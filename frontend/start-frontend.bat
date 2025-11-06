@@ -1,0 +1,3 @@
+@echo off
+echo Starting TokenTradeX Frontend...
+npm run dev

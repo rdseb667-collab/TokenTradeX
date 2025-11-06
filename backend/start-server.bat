@@ -1,0 +1,3 @@
+@echo off
+echo Starting TokenTradeX Backend Server...
+npm start
