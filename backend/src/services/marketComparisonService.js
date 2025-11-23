@@ -167,10 +167,21 @@ class MarketComparisonService {
 
     const feeDiscount = tradingFee * discount;
     
-    // Revenue share (assume platform does $1M/month, 15% to holders)
+    // Revenue share (use actual platform revenue, 15% to holders)
     const circulatingSupply = 500000000;
     const userShare = (ttxHoldings / circulatingSupply);
-    const revenueShare = 1000000 * 0.15 * userShare;
+    
+    // Get actual platform revenue (fallback to $1M if not available)
+    const revenueStreamService = require('./revenueStreamService');
+    let platformRevenue = 1000000; // Default fallback
+    try {
+      const flywheelMetrics = revenueStreamService.getFlywheelMetrics();
+      platformRevenue = flywheelMetrics.totalPlatformRevenue || 1000000;
+    } catch (error) {
+      // Use fallback if service not available
+    }
+    
+    const revenueShare = platformRevenue * 0.15 * userShare;
 
     return {
       feeDiscount,

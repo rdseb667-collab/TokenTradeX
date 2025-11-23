@@ -1,6 +1,10 @@
 const { ethers } = require('ethers');
 const logger = require('./logger');
 
+// Centralized revenue split percentages from environment
+const HOLDER_PCT = (() => { const v = parseFloat(process.env.REVENUE_HOLDER_PERCENTAGE ?? '0.15'); return isNaN(v) ? 0.15 : v; })();
+const RESERVE_PCT = (() => { const v = parseFloat(process.env.REVENUE_RESERVE_PERCENTAGE ?? '0.85'); return isNaN(v) ? 0.85 : v; })();
+
 /**
  * TTX Unified Service
  * Integrates with TTXUnified.sol smart contract
@@ -64,25 +68,30 @@ class TTXUnifiedService {
   /**
    * Collect revenue from platform operations
    * Auto-compounding for all stakers!
+   * 
+   * @param {number} streamId - Revenue stream ID (0-9)
+   * @param {number} amount - Amount in ETH (already converted from USD if needed)
+   * @param {boolean} sendValue - If true, send ETH with transaction (default: false)
    */
-  async collectRevenue(streamId, amount) {
+  async collectRevenue(streamId, amount, sendValue = false) {
     try {
       if (!this.initialized) {
         throw new Error('Service not initialized');
       }
 
       const amountWei = ethers.parseEther(amount.toString());
-      const tx = await this.contract.collectRevenue(streamId, amountWei, {
-        value: amountWei
-      });
+      const txOptions = sendValue ? { value: amountWei } : { value: 0 };
+      
+      const tx = await this.contract.collectRevenue(streamId, amountWei, txOptions);
       
       await tx.wait();
       
       logger.info('Revenue collected - 85/15 split active', {
         streamId,
         amount,
-        holderShare: amount * 0.15,   // 15% to holders (fair!)
-        platformShare: amount * 0.85  // 85% to platform (your profit!)
+        holderShare: amount * HOLDER_PCT,
+        platformShare: amount * RESERVE_PCT,
+        ethSent: sendValue
       });
       
       return {

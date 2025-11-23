@@ -55,6 +55,12 @@ const Order = sequelize.define('Order', {
       return parseFloat(this.quantity) - parseFloat(this.filledQuantity);
     }
   },
+  tokenSymbol: {
+    type: DataTypes.VIRTUAL,
+    get() {
+      return this.Token?.symbol || null;
+    }
+  },
   status: {
     type: DataTypes.ENUM('pending', 'partial', 'filled', 'cancelled', 'rejected'),
     defaultValue: 'pending'
@@ -78,6 +84,11 @@ const Order = sequelize.define('Order', {
   cancelledAt: {
     type: DataTypes.DATE,
     allowNull: true
+  },
+  idempotencyKey: {
+    type: DataTypes.STRING(255),
+    allowNull: true,
+    comment: 'Client-provided key for idempotent order creation'
   }
 }, {
   tableName: 'orders',
@@ -85,7 +96,8 @@ const Order = sequelize.define('Order', {
     { fields: ['user_id'] },
     { fields: ['token_id'] },
     { fields: ['status'] },
-    { fields: ['created_at'] }
+    { fields: ['created_at'] },
+    { fields: ['user_id', 'idempotency_key'], unique: true, name: 'orders_user_idempotency_unique' }
   ]
 });
 

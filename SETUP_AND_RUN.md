@@ -260,6 +260,34 @@ cd ..\frontend && npm install
    npm run db:seed
    ```
 
+### Starting the application without a database
+**Solution:**
+If you want to start the backend without a database connection (e.g., for UI development only), you can set the `ALLOW_START_WITHOUT_DB` environment variable:
+
+1. Add to your `backend/.env` file:
+   ```env
+   ALLOW_START_WITHOUT_DB=true
+   ```
+2. Start the backend:
+   ```bash
+   cd backend
+   npm run dev
+   ```
+
+The server will start in stub mode and return 503 errors for database-dependent endpoints while allowing UI development to proceed. The `/health` endpoint will return a 503 status with "degraded" status until Postgres is connected, mirroring real availability.
+
+### Configuring database polling interval
+
+When running in stub mode, the server periodically checks if the database becomes available. You can configure the polling interval using the `DB_POLL_INTERVAL_MS` environment variable:
+
+1. Add to your `backend/.env` file:
+   ```env
+   ALLOW_START_WITHOUT_DB=true
+   DB_POLL_INTERVAL_MS=10000
+   ```
+
+This will check the database every 10 seconds (instead of the default 30 seconds). When the database becomes available, the server will automatically initialize database-dependent services and enable API/WebSocket access. The `/health` endpoint will update to show "ok" status with 200 response once the database is connected.
+
 ---
 
 ## 📋 Available Commands
@@ -282,6 +310,14 @@ cd ..\frontend && npm install
 | `npm run dev` | Start backend dev server |
 | `npm run db:migrate` | Run database migrations |
 | `npm run db:seed` | Seed database with demo data |
+
+### Smart Contracts (from contracts/ folder)
+
+| Command | Description |
+|---------|-------------|
+| `npm run compile` | Compile contracts using Hardhat (requires network access) |
+| `npm run compile:offline` | Compile contracts offline using bundled solc compiler |
+| `npm run test` | Run contract tests |
 
 ---
 

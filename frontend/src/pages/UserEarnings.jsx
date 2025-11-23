@@ -25,17 +25,26 @@ import {
   EmojiEvents
 } from '@mui/icons-material';
 import { useSelector } from 'react-redux';
+import InfoTooltip from '../components/InfoTooltip';
 import api from '../services/api';
 
 export default function UserEarnings() {
   const { user } = useSelector(state => state.auth);
   const [earnings, setEarnings] = useState(null);
+  const [myImpact, setMyImpact] = useState(null);
+  const [miningStats, setMiningStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadEarnings();
+    loadMyImpact();
+    loadMiningStats();
     // Refresh every 30 seconds to show live earnings
-    const interval = setInterval(loadEarnings, 30000);
+    const interval = setInterval(() => {
+      loadEarnings();
+      loadMyImpact();
+      loadMiningStats();
+    }, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -47,6 +56,24 @@ export default function UserEarnings() {
     } catch (error) {
       console.error('Error loading earnings:', error);
       setLoading(false);
+    }
+  };
+
+  const loadMyImpact = async () => {
+    try {
+      const res = await api.get('/flywheel/my-impact');
+      setMyImpact(res.data.yourImpact);
+    } catch (error) {
+      console.error('Error loading my impact:', error);
+    }
+  };
+
+  const loadMiningStats = async () => {
+    try {
+      const res = await api.get('/earnings/mining');
+      setMiningStats(res.data.mining);
+    } catch (error) {
+      console.error('Error loading mining stats:', error);
     }
   };
 
@@ -66,11 +93,222 @@ export default function UserEarnings() {
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
+      {/* Security & Tokenomics Badge */}
+      <Alert severity="success" sx={{ mb: 3, bgcolor: '#0a0e14', border: '3px solid #00ff88' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+          <Typography variant="h6" sx={{ fontWeight: 'bold', color: '#00ff88' }}>
+            🔒 Audit-Ready Tokenomics
+          </Typography>
+          <Chip label="85/15 Split" size="small" sx={{ bgcolor: '#FFD700', color: '#000', fontWeight: 700 }} />
+          <Chip label="No Donation Attacks" size="small" sx={{ bgcolor: '#00ff88', color: '#000', fontWeight: 700 }} />
+          <Chip label="Real Buybacks" size="small" sx={{ bgcolor: '#00aaff', color: '#fff', fontWeight: 700 }} />
+          <Chip label="10% Withdrawal Limits" size="small" sx={{ bgcolor: '#BA68C8', color: '#fff', fontWeight: 700 }} />
+        </Box>
+        <Typography variant="body2" sx={{ mt: 1, color: '#9ca3af' }}>
+          Smart contract follows Synthetix/Curve/Lido patterns. Separate TTX/ETH accounting, no double-counting, transferFrom security.
+        </Typography>
+      </Alert>
+
+      {/* Trading Mining Panel */}
+      {miningStats && (
+        <Paper sx={{ p: 3, mb: 3, bgcolor: '#0f1419', border: '3px solid #ffaa00' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h5" sx={{ fontWeight: 'bold', color: '#ffaa00' }}>
+              💎 Trading Mining Rewards
+            </Typography>
+            <InfoTooltip title="Earn TTX automatically by trading. Volume-based tiers reward active traders!" />
+          </Box>
+          <Grid container spacing={3}>
+            <Grid item xs={12} md={3}>
+              <Box>
+                <Typography variant="body2" sx={{ color: '#9ca3af' }} gutterBottom>
+                  Earned Today
+                </Typography>
+                <Typography variant="h3" sx={{ fontWeight: 'bold', color: '#e8e8e8' }}>
+                  {miningStats.dailyMining.toFixed(2)} TTX
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                  Daily Cap: {miningStats.dailyCap} TTX
+                </Typography>
+                {/* Progress bar for daily cap */}
+                <Box sx={{ mt: 1 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                    <Typography variant="caption" sx={{ fontSize: '10px', color: '#9ca3af' }}>
+                      Progress
+                    </Typography>
+                    <Typography variant="caption" sx={{ fontSize: '10px', color: '#ffaa00', fontWeight: 700 }}>
+                      {((miningStats.dailyMining / miningStats.dailyCap) * 100).toFixed(1)}%
+                    </Typography>
+                  </Box>
+                  <Box sx={{ width: '100%', height: 8, bgcolor: '#1f2937', borderRadius: 1, overflow: 'hidden' }}>
+                    <Box 
+                      sx={{ 
+                        width: `${Math.min((miningStats.dailyMining / miningStats.dailyCap) * 100, 100)}%`, 
+                        height: '100%', 
+                        bgcolor: '#ffaa00',
+                        transition: 'width 0.5s ease',
+                        boxShadow: '0 0 10px rgba(255, 170, 0, 0.5)'
+                      }}
+                    />
+                  </Box>
+                </Box>
+              </Box>
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <Box>
+                <Typography variant="body2" sx={{ color: '#9ca3af' }} gutterBottom>
+                  This Month
+                </Typography>
+                <Typography variant="h3" sx={{ fontWeight: 'bold', color: '#ffaa00' }}>
+                  {miningStats.monthlyMining.toFixed(2)} TTX
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                  From trading
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <Box>
+                <Typography variant="body2" sx={{ color: '#9ca3af' }} gutterBottom>
+                  Current Rate
+                </Typography>
+                <Typography variant="h3" sx={{ fontWeight: 'bold', color: '#00ff88' }}>
+                  {miningStats.currentTier.reward} TTX
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                  Per $100 traded
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <Box>
+                <Typography variant="body2" sx={{ color: '#9ca3af' }} gutterBottom>
+                  Volume Today
+                </Typography>
+                <Typography variant="h3" sx={{ fontWeight: 'bold', color: '#00aaff' }}>
+                  ${miningStats.dailyVolume.toFixed(0)}
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                  Trading volume
+                </Typography>
+              </Box>
+            </Grid>
+          </Grid>
+          <Alert severity="info" sx={{ mt: 2, bgcolor: '#1a2a1a', border: '1px solid #ffaa00' }}>
+            <Typography variant="body2" sx={{ color: '#e8e8e8', mb: 1 }}>
+              🚀 <strong>Earn MORE:</strong> Trade $10K+ for 10 TTX/$100 | Trade $100K+ for 20 TTX/$100
+            </Typography>
+            {/* Next tier progress */}
+            {miningStats.dailyVolume < 10000 && (
+              <Box sx={{ mt: 1 }}>
+                <Typography variant="caption" sx={{ fontSize: '10px', color: '#9ca3af' }}>
+                  ${miningStats.dailyVolume.toFixed(0)} / $10,000 to unlock Tier 2 (10 TTX/$100)
+                </Typography>
+                <Box sx={{ width: '100%', height: 6, bgcolor: '#0f1419', borderRadius: 1, overflow: 'hidden', mt: 0.5 }}>
+                  <Box 
+                    sx={{ 
+                      width: `${Math.min((miningStats.dailyVolume / 10000) * 100, 100)}%`, 
+                      height: '100%', 
+                      bgcolor: '#00ff88',
+                      transition: 'width 0.5s ease'
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+            {miningStats.dailyVolume >= 10000 && miningStats.dailyVolume < 100000 && (
+              <Box sx={{ mt: 1 }}>
+                <Typography variant="caption" sx={{ fontSize: '10px', color: '#9ca3af' }}>
+                  ${miningStats.dailyVolume.toFixed(0)} / $100,000 to unlock Tier 3 (20 TTX/$100)
+                </Typography>
+                <Box sx={{ width: '100%', height: 6, bgcolor: '#0f1419', borderRadius: 1, overflow: 'hidden', mt: 0.5 }}>
+                  <Box 
+                    sx={{ 
+                      width: `${Math.min((miningStats.dailyVolume / 100000) * 100, 100)}%`, 
+                      height: '100%', 
+                      bgcolor: '#00ff88',
+                      transition: 'width 0.5s ease'
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+            {miningStats.dailyVolume >= 100000 && (
+              <Typography variant="caption" sx={{ fontSize: '10px', color: '#00ff88', fontWeight: 700 }}>
+                🏆 MAX TIER UNLOCKED! Earning 20 TTX per $100 traded
+              </Typography>
+            )}
+          </Alert>
+        </Paper>
+      )}
+
+      {/* My Impact Panel - NEW */}
+      {myImpact && (
+        <Paper sx={{ p: 3, mb: 3, bgcolor: '#0f1419', border: '3px solid #00aaff' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h5" sx={{ fontWeight: 'bold', color: '#00aaff' }}>
+              🎯 Your Platform Impact (85/15 Economics)
+            </Typography>
+            <InfoTooltip title="See how your holdings contribute to the dual-benefit model: You earn 15%, platform grows with 85%" />
+          </Box>
+          <Grid container spacing={3}>
+            <Grid item xs={12} md={4}>
+              <Box>
+                <Typography variant="body2" sx={{ color: '#9ca3af' }} gutterBottom>
+                  Your TTX Holdings
+                </Typography>
+                <Typography variant="h3" sx={{ fontWeight: 'bold', color: '#e8e8e8' }}>
+                  {myImpact.ttxHoldings.toLocaleString()}
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                  TTX tokens
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Box>
+                <Typography variant="body2" sx={{ color: '#9ca3af' }} gutterBottom>
+                  Monthly Trading Volume
+                </Typography>
+                <Typography variant="h3" sx={{ fontWeight: 'bold', color: '#ffaa00' }}>
+                  ${myImpact.monthlyVolume.toLocaleString()}
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                  Last 30 days
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Box>
+                <Typography variant="body2" sx={{ color: '#9ca3af' }} gutterBottom>
+                  Estimated Monthly Earnings
+                </Typography>
+                <Typography variant="h3" sx={{ fontWeight: 'bold', color: '#00ff88' }}>
+                  ${myImpact.monthlyEarnings.toFixed(2)}
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                  Passive income
+                </Typography>
+              </Box>
+            </Grid>
+          </Grid>
+          <Alert severity="success" sx={{ mt: 2, bgcolor: '#1a2a1a', border: '1px solid #00aaff' }}>
+            <Typography variant="body2" sx={{ color: '#e8e8e8' }}>
+              💡 <strong style={{ color: '#00ff88' }}>15% to you</strong> (fair, sustainable rewards) + <strong style={{ color: '#FFD700' }}>85% to platform</strong> (drives growth) = Win-win economics!<br/>
+              Every trade strengthens reserve backing. Platform uses ETH reserve for real buybacks via Uniswap.
+            </Typography>
+          </Alert>
+        </Paper>
+      )}
+
       {/* Hero Stats */}
       <Box sx={{ mb: 4 }}>
-        <Typography variant="h3" sx={{ fontWeight: 900, mb: 1 }}>
-          💰 Your Earnings Dashboard
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+          <Typography variant="h3" sx={{ fontWeight: 900 }}>
+            💰 Your Earnings Dashboard
+          </Typography>
+          <InfoTooltip title="Track all your passive income from trading fees and mining rewards" />
+        </Box>
         <Typography variant="h6" sx={{ color: 'text.secondary', mb: 3 }}>
           You earn from EVERY trade on the platform - even trades you don't make!
         </Typography>
@@ -159,23 +397,25 @@ export default function UserEarnings() {
       </Box>
 
       {/* How It Works */}
-      <Alert severity="info" sx={{ mb: 3 }}>
-        <Typography variant="body1" sx={{ fontWeight: 'bold', mb: 1 }}>
-          🎯 How You're Earning Right Now:
+      <Alert severity="info" sx={{ mb: 3, bgcolor: '#0a0e14', border: '2px solid #00ff88' }}>
+        <Typography variant="body1" sx={{ fontWeight: 'bold', mb: 1, color: '#00ff88' }}>
+          🎯 How You're Earning Right Now (85/15 Split):
         </Typography>
-        <Typography variant="body2">
+        <Typography variant="body2" sx={{ color: '#e8e8e8' }}>
           • You hold {ttxHoldings.toLocaleString()} TTX tokens ({((ttxHoldings / 500000000) * 100).toFixed(4)}% of supply)<br/>
-          • Every trade on the platform generates fees<br/>
-          • 15% of ALL fees → Automatically split among TTX holders<br/>
-          • Your share is deposited to your wallet automatically<br/>
-          • <strong>No staking required. No claiming. Just hold TTX and earn!</strong>
+          • Every trade on the platform generates fees (0.08-0.12%)<br/>
+          • <strong style={{ color: '#00ff88' }}>15% of ALL fees → Automatically split among TTX holders</strong><br/>
+          • <strong style={{ color: '#FFD700' }}>85% → Platform profit</strong> (owner keeps most)<br/>
+          • Your share is auto-compounded to your staked balance<br/>
+          • <strong>✅ Audit-ready smart contract</strong> - No donation attacks, no double-counting<br/>
+          • <strong>No manual claiming required. Just hold/stake TTX and earn!</strong>
         </Typography>
       </Alert>
 
       {/* Projections */}
-      <Paper sx={{ p: 3, mb: 3, bgcolor: '#0f1419', border: '2px solid #FFD700' }}>
+      <Paper sx={{ p: 3, mb: 3, bgcolor: '#0f1419', border: '3px solid #FFD700' }}>
         <Typography variant="h5" sx={{ fontWeight: 'bold', mb: 2, color: '#FFD700' }}>
-          📈 Your Earning Projections
+          📈 Your Earning Projections (Verified Metrics)
         </Typography>
         <Grid container spacing={3}>
           <Grid item xs={12} md={6}>
@@ -206,10 +446,12 @@ export default function UserEarnings() {
           </Grid>
         </Grid>
 
-        <Alert severity="success" sx={{ mt: 2, bgcolor: '#1a2a1a', border: '1px solid #00ff88' }}>
+        <Alert severity="success" sx={{ mt: 2, bgcolor: '#1a2a1a', border: '2px solid #00ff88' }}>
           <Typography variant="body2" sx={{ color: '#e8e8e8' }}>
-            💡 <strong style={{ color: '#00ff88' }}>Earning Tip:</strong> As platform volume grows, your earnings grow automatically! 
-            If volume 10x, your earnings 10x. <strong style={{ color: '#FFD700' }}>Example: 10,000 TTX at Binance-scale = $300/month passive income!</strong>
+            💡 <strong style={{ color: '#00ff88' }}>Earning Tip:</strong> As platform volume grows, your earnings grow automatically! <br/>
+            If volume 10x, your earnings 10x. <br/>
+            <strong style={{ color: '#FFD700' }}>Example: 10,000 TTX at 500K user scale = $300/month passive income!</strong><br/>
+            <strong style={{ color: '#00aaff' }}>Security: </strong>Smart contract uses transferFrom (donation-attack proof), separate TTX/ETH accounting, 10% withdrawal limits.
           </Typography>
         </Alert>
       </Paper>

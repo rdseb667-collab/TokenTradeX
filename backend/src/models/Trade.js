@@ -9,12 +9,12 @@ const Trade = sequelize.define('Trade', {
   },
   buyOrderId: {
     type: DataTypes.UUID,
-    allowNull: false,
+    allowNull: true,  // Allow null for auto-fill trades
     field: 'buy_order_id'
   },
   sellOrderId: {
     type: DataTypes.UUID,
-    allowNull: false,
+    allowNull: true,  // Allow null for auto-fill trades
     field: 'sell_order_id'
   },
   buyerId: {
@@ -57,7 +57,7 @@ const Trade = sequelize.define('Trade', {
   },
   // Future: Advanced features
   tradeType: {
-    type: DataTypes.ENUM('spot', 'margin', 'futures'),
+    type: DataTypes.ENUM('spot', 'margin', 'futures', 'matched', 'auto_fill'),
     defaultValue: 'spot',
     field: 'trade_type'
   },
@@ -71,6 +71,12 @@ const Trade = sequelize.define('Trade', {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,
     field: 'executed_at'
+  },
+  // Metadata for rebate tracking and analytics
+  metadata: {
+    type: DataTypes.JSONB,
+    allowNull: true,
+    comment: 'Fee details, rebate info, tier data, etc.'
   }
 }, {
   tableName: 'trades',

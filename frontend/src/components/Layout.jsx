@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   AppBar,
@@ -16,7 +16,11 @@ import {
   Avatar,
   Menu,
   MenuItem,
-  Divider
+  Divider,
+  Button,
+  Chip,
+  Select,
+  MenuItem as SelectMenuItem
 } from '@mui/material';
 import {
   Menu as MenuIcon,
@@ -32,6 +36,7 @@ import {
   Rocket,
   CardMembership,
   MonetizationOn,
+  LocalAtm,
   Warning,
   Public,
   TrendingUp,
@@ -39,29 +44,27 @@ import {
   AccountBalance,
   EmojiEvents,
   PieChart,
-  Settings
+  Settings,
+  HelpOutline,
+  Add
 } from '@mui/icons-material';
 
 import { logout } from '../store/slices/authSlice';
+import AddFundsModal from './AddFundsModal';
 
 const drawerWidth = 240;
 
-// USER MENU - Optimized for trading & tracking
+// USER MENU - Simplified core items
 const userMenuItems = [
   { text: 'Dashboard', icon: <Dashboard />, path: '/app/dashboard' },
   { text: 'Trading', icon: <ShowChart />, path: '/app/trading' },
-  { text: 'Staking', icon: <AccountBalance />, path: '/app/staking', highlight: true },
-  { text: 'Synthetic Positions', icon: <PieChart />, path: '/app/synthetic-positions', highlight: true },
-  { text: 'Dividend Lottery', icon: <EmojiEvents />, path: '/app/dividend-lottery', highlight: true },
-  { text: 'Fractional Shares', icon: <TrendingUp />, path: '/fractional-shares', highlight: true, external: true },
-  { text: 'RWA Marketplace', icon: <Public />, path: '/rwa-marketplace', highlight: true, external: true },
   { text: 'Wallet', icon: <AccountBalanceWallet />, path: '/app/wallet' },
-  { text: 'My Earnings', icon: <MonetizationOn />, path: '/app/my-earnings', highlight: true },
   { text: 'Orders', icon: <Receipt />, path: '/app/orders' },
-  { text: 'Subscriptions', icon: <CardMembership />, path: '/app/subscriptions' },
-  { text: 'Margin', icon: <AttachMoney />, path: '/app/margin', highlight: true },
-  { text: 'Copy Trading', icon: <Stars />, path: '/app/copy-trading', highlight: true },
+  { text: 'My Earnings', icon: <MonetizationOn />, path: '/app/my-earnings', highlight: true },
+  { text: 'Volume Rebates', icon: <LocalAtm />, path: '/app/volume-rebates', highlight: true },
+  { text: '💰 Revenue Streams', icon: <AttachMoney />, path: '/app/revenue-streams', highlight: true },
   { text: 'Settings', icon: <Settings />, path: '/app/settings' },
+  { text: 'Help Center', icon: <HelpOutline />, path: '/app/help' },
 ];
 
 // ADMIN MENU - Extensive RWA & platform management
@@ -76,10 +79,12 @@ const adminMenuItems = [
 
 export default function Layout() {
   const navigate = useNavigate();
+  const location = useLocation();
   const dispatch = useDispatch();
   const { user } = useSelector((state) => state.auth);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
+  const [addFundsOpen, setAddFundsOpen] = useState(false);
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
@@ -198,48 +203,181 @@ export default function Layout() {
 
   return (
     <Box sx={{ display: 'flex' }}>
+      {/* Sticky Global Header */}
       <AppBar
         position="fixed"
         sx={{
-          width: { sm: `calc(100% - ${drawerWidth}px)` },
-          ml: { sm: `${drawerWidth}px` },
-          bgcolor: 'background.paper'
+          width: '100%',
+          bgcolor: '#0a0e14',
+          borderBottom: '1px solid #1f2937',
+          boxShadow: '0 2px 10px rgba(0, 0, 0, 0.5)',
+          zIndex: 1300
         }}
       >
-        <Toolbar>
-          <IconButton
-            color="inherit"
-            edge="start"
-            onClick={handleDrawerToggle}
-            sx={{ mr: 2, display: { sm: 'none' } }}
-          >
-            <MenuIcon />
-          </IconButton>
-          <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-            Welcome, {user?.firstName || user?.username}
-          </Typography>
-          <IconButton onClick={handleMenuOpen}>
-            <Avatar sx={{ bgcolor: 'primary.main' }}>
-              {user?.username?.[0]?.toUpperCase()}
-            </Avatar>
-          </IconButton>
-          <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={handleMenuClose}>
-            <MenuItem disabled>
-              <AccountCircle sx={{ mr: 1 }} />
-              {user?.email}
-            </MenuItem>
-            <MenuItem disabled sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>
-              Role: {user?.role}
-            </MenuItem>
-            <Divider />
-            <MenuItem onClick={() => { navigate('/app/settings'); handleMenuClose(); }}>
-              <Settings sx={{ mr: 1 }} />
-              Settings
-            </MenuItem>
-            <MenuItem onClick={handleLogout}>Logout</MenuItem>
-          </Menu>
+        <Toolbar sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', px: 2 }}>
+          {/* Left Section - Branding and Quick Navigation */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+            {/* TokenTradeX Branding */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography 
+                variant="h6" 
+                component="div" 
+                sx={{ 
+                  fontWeight: 800, 
+                  background: 'linear-gradient(45deg, #00aaff, #00ff88)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  letterSpacing: '0.5px'
+                }}
+              >
+                TokenTradeX
+              </Typography>
+              <Chip 
+                label="BETA" 
+                size="small" 
+                sx={{ 
+                  height: '16px', 
+                  borderRadius: 0,
+                  bgcolor: 'rgba(0, 255, 136, 0.1)',
+                  color: '#00ff88',
+                  fontWeight: 700,
+                  fontSize: '8px'
+                }} 
+              />
+            </Box>
+            
+            {/* Quick Navigation */}
+            <Box sx={{ display: { xs: 'none', md: 'flex' }, gap: 2 }}>
+              <Button 
+                size="small" 
+                onClick={() => navigate('/app/trading')}
+                sx={{ 
+                  color: location.pathname.includes('trading') ? '#00ff88' : '#9ca3af',
+                  fontWeight: 700,
+                  fontSize: '12px',
+                  textTransform: 'none',
+                  minWidth: 0,
+                  '&:hover': { color: '#00ff88' }
+                }}
+              >
+                Trading
+              </Button>
+              <Button 
+                size="small" 
+                onClick={() => navigate('/app/dashboard')}
+                sx={{ 
+                  color: location.pathname.includes('dashboard') ? '#00ff88' : '#9ca3af',
+                  fontWeight: 700,
+                  fontSize: '12px',
+                  textTransform: 'none',
+                  minWidth: 0,
+                  '&:hover': { color: '#00ff88' }
+                }}
+              >
+                Dashboard
+              </Button>
+              <Button 
+                size="small" 
+                onClick={() => navigate('/app/wallet')}
+                sx={{ 
+                  color: location.pathname.includes('wallet') ? '#00ff88' : '#9ca3af',
+                  fontWeight: 700,
+                  fontSize: '12px',
+                  textTransform: 'none',
+                  minWidth: 0,
+                  '&:hover': { color: '#00ff88' }
+                }}
+              >
+                Wallet
+              </Button>
+            </Box>
+          </Box>
+          
+          {/* Right Section - Network Indicator and User Menu */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            {/* Live Network Indicator */}
+            <Chip 
+              icon={<Public sx={{ color: '#00ff88 !important', fontSize: '14px !important' }} />}
+              label="Mainnet"
+              size="small" 
+              sx={{ 
+                height: '24px', 
+                borderRadius: 0,
+                bgcolor: 'rgba(0, 255, 136, 0.1)',
+                color: '#00ff88',
+                fontWeight: 700,
+                fontSize: '10px',
+                '& .MuiChip-icon': {
+                  color: '#00ff88'
+                }
+              }} 
+            />
+            
+            {/* Language Selector */}
+            <Select
+              value="EN"
+              size="small"
+              sx={{ 
+                height: '24px',
+                fontSize: '10px',
+                fontWeight: 700,
+                color: '#9ca3af',
+                '& .MuiSelect-select': { py: 0, pl: 1, pr: 2 },
+                '& .MuiOutlinedInput-notchedOutline': { borderColor: '#1f2937' },
+                '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#00aaff' },
+                '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#00aaff' }
+              }}
+            >
+              <SelectMenuItem value="EN">EN</SelectMenuItem>
+              <SelectMenuItem value="ES">ES</SelectMenuItem>
+              <SelectMenuItem value="ZH">中文</SelectMenuItem>
+            </Select>
+            
+            {/* Add Funds Button */}
+            <Button 
+              variant="contained" 
+              startIcon={<Add />}
+              onClick={() => setAddFundsOpen(true)}
+              size="small"
+              sx={{ 
+                bgcolor: 'success.main',
+                '&:hover': { bgcolor: 'success.dark' },
+                boxShadow: 2,
+                textTransform: 'none',
+                height: '24px',
+                fontSize: '10px',
+                fontWeight: 700
+              }}
+            >
+              Add Funds
+            </Button>
+            
+            {/* User Menu */}
+            <IconButton onClick={handleMenuOpen} size="small">
+              <Avatar sx={{ width: 24, height: 24, fontSize: '12px', bgcolor: 'primary.main' }}>
+                {user?.username?.[0]?.toUpperCase()}
+              </Avatar>
+            </IconButton>
+          </Box>
         </Toolbar>
       </AppBar>
+      
+      {/* User Menu Dropdown */}
+      <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={handleMenuClose}>
+        <MenuItem disabled>
+          <AccountCircle sx={{ mr: 1 }} />
+          {user?.email}
+        </MenuItem>
+        <MenuItem disabled sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>
+          Role: {user?.role}
+        </MenuItem>
+        <Divider />
+        <MenuItem onClick={() => { navigate('/app/settings'); handleMenuClose(); }}>
+          <Settings sx={{ mr: 1 }} />
+          Settings
+        </MenuItem>
+        <MenuItem onClick={handleLogout}>Logout</MenuItem>
+      </Menu>
       <Box
         component="nav"
         sx={{ width: { sm: drawerWidth }, flexShrink: { sm: 0 } }}
@@ -273,11 +411,17 @@ export default function Layout() {
           flexGrow: 1,
           p: 3,
           width: { sm: `calc(100% - ${drawerWidth}px)` },
-          mt: 8
+          mt: '64px' // Height of the new header
         }}
       >
         <Outlet />
       </Box>
+      
+      <AddFundsModal 
+        open={addFundsOpen} 
+        onClose={() => setAddFundsOpen(false)}
+        onDepositSuccess={() => setAddFundsOpen(false)}
+      />
     </Box>
   );
 }

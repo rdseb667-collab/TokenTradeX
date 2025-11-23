@@ -126,6 +126,22 @@ class SubscriptionService {
         autoRenew: true
       });
 
+      // Collect subscription revenue (Stream #2)
+      const subscriptionPrice = SUBSCRIPTION_TIERS[newTier].price;
+      const revenueCollector = require('../helpers/revenueCollector');
+      setImmediate(async () => {
+        try {
+          await revenueCollector.collectRevenue(
+            2, 
+            subscriptionPrice, 
+            `Premium subscription: ${newTier} tier`
+          );
+          console.log(`💎 Subscription revenue collected: $${subscriptionPrice} (${newTier})`);
+        } catch (error) {
+          console.error('Failed to collect subscription revenue:', error.message);
+        }
+      });
+
       logger.info('Subscription upgraded', {
         userId,
         oldTier: currentSub.tier,

@@ -5,6 +5,11 @@ pragma solidity ^0.8.0;
  * @title TTXToken - TokenTradeX Platform Token
  * @notice ERC20 token with built-in transaction fee mechanism
  * @dev Fees collected from every transfer go to designated pools
+ * 
+ * ⚠️ DEPRECATED - Nov 2025
+ * This contract is RETIRED. Use TTXUnified.sol instead.
+ * Reason: Conflicting tokenomics (40/30/20/10 split vs 85/15 unified model)
+ * Migration: All new deployments use TTXUnified.sol with clean 85/15 split
  */
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";

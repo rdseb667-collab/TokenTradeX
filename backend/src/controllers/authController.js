@@ -1,13 +1,26 @@
 const jwt = require('jsonwebtoken');
-const { User } = require('../models');
+const speakeasy = require('speakeasy');
+const { User, AuditLog } = require('../models');
 const referralService = require('../services/referralService');
 const auditService = require('../services/auditService');
+const { validatePasswordStrength } = require('../utils/passwordValidator');
 
 class AuthController {
   // Register new user (CANNOT create admin accounts)
   async register(req, res, next) {
     try {
       const { email, username, password, firstName, lastName, referralCode, role } = req.body;
+
+      // Validate password strength
+      const passwordValidation = validatePasswordStrength(password);
+      if (!passwordValidation.valid) {
+        return res.status(400).json({
+          success: false,
+          message: 'Password does not meet requirements',
+          errors: passwordValidation.errors,
+          strength: passwordValidation.strength
+        });
+      }
 
       // BLOCK admin account creation through public registration
       if (role === 'admin' || role === 'super_admin') {
@@ -76,12 +89,20 @@ class AuthController {
   // Login user
   async login(req, res, next) {
     try {
-      const { email, password } = req.body;
+      const { email, password, twoFactorToken } = req.body;
 
       // Find user
       const user = await User.findOne({ where: { email } });
 
       if (!user) {
+        // Audit failed login
+        await AuditLog.create({
+          action: 'LOGIN_FAILED',
+          ipAddress: req.ip,
+          userAgent: req.headers['user-agent'],
+          details: { email, reason: 'user_not_found' }
+        });
+        
         return res.status(401).json({
           success: false,
           message: 'Invalid credentials'
@@ -92,6 +113,15 @@ class AuthController {
       const isMatch = await user.comparePassword(password);
 
       if (!isMatch) {
+        // Audit failed login
+        await AuditLog.create({
+          userId: user.id,
+          action: 'LOGIN_FAILED',
+          ipAddress: req.ip,
+          userAgent: req.headers['user-agent'],
+          details: { email, reason: 'incorrect_password' }
+        });
+        
         return res.status(401).json({
           success: false,
           message: 'Invalid credentials'
@@ -105,8 +135,51 @@ class AuthController {
         });
       }
 
+      // Check 2FA if enabled
+      if (user.twoFactorEnabled) {
+        if (!twoFactorToken) {
+          return res.status(200).json({
+            success: false,
+            requires2FA: true,
+            message: '2FA token required'
+          });
+        }
+
+        const verified = speakeasy.totp.verify({
+          secret: user.twoFactorSecret,
+          encoding: 'base32',
+          token: twoFactorToken,
+          window: 2
+        });
+
+        if (!verified) {
+          // Audit failed 2FA
+          await AuditLog.create({
+            userId: user.id,
+            action: '2FA_FAILED',
+            ipAddress: req.ip,
+            userAgent: req.headers['user-agent'],
+            details: { email }
+          });
+          
+          return res.status(401).json({
+            success: false,
+            message: 'Invalid 2FA token'
+          });
+        }
+      }
+
       // Update last login
       await user.update({ lastLogin: new Date() });
+
+      // Audit successful login
+      await AuditLog.create({
+        userId: user.id,
+        action: 'LOGIN_SUCCESS',
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+        details: { email, twoFactorUsed: user.twoFactorEnabled }
+      });
 
       // Generate token - HARDENED: No fallback in production
       const secret = process.env.JWT_SECRET;
@@ -173,6 +246,17 @@ class AuthController {
     try {
       const { currentPassword, newPassword } = req.body;
 
+      // Validate new password strength
+      const passwordValidation = validatePasswordStrength(newPassword);
+      if (!passwordValidation.valid) {
+        return res.status(400).json({
+          success: false,
+          message: 'New password does not meet requirements',
+          errors: passwordValidation.errors,
+          strength: passwordValidation.strength
+        });
+      }
+
       const isMatch = await req.user.comparePassword(currentPassword);
 
       if (!isMatch) {
@@ -183,6 +267,15 @@ class AuthController {
       }
 
       await req.user.update({ password: newPassword });
+
+      // Audit password change
+      await AuditLog.create({
+        userId: req.user.id,
+        action: 'PASSWORD_CHANGED',
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+        details: { email: req.user.email }
+      });
 
       res.json({
         success: true,

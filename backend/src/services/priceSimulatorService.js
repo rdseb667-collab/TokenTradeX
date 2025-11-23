@@ -84,6 +84,9 @@ class PriceSimulatorService {
             low24h: this.priceHistory[token.symbol].low24h,
             timestamp: new Date().toISOString()
           });
+          console.log(`📡 Broadcasting ${token.symbol}: $${newPrice.toFixed(2)} (${priceChange >= 0 ? '+' : ''}${priceChange.toFixed(2)}%)`);
+        } else {
+          console.log(`⚠️ No WebSocket connection available for ${token.symbol}`);
         }
       } catch (error) {
         console.error(`Error updating price for ${token.symbol}:`, error);

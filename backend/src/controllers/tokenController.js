@@ -98,8 +98,8 @@ class TokenController {
       });
 
       // Aggregate orders by price level
-      const aggregateBids = this.aggregateOrders(buyOrders);
-      const aggregateAsks = this.aggregateOrders(sellOrders);
+      const aggregateBids = TokenController.aggregateOrders(buyOrders);
+      const aggregateAsks = TokenController.aggregateOrders(sellOrders);
 
       res.json({
         success: true,
@@ -118,12 +118,12 @@ class TokenController {
   }
 
   // Helper method to aggregate orders
-  aggregateOrders(orders) {
+  static aggregateOrders(orders) {
     const priceMap = new Map();
 
     orders.forEach(order => {
       const price = parseFloat(order.price);
-      const quantity = parseFloat(order.quantity) - parseFloat(order.filledQuantity);
+      const quantity = parseFloat(order.quantity) - parseFloat(order.filledQuantity || 0);
 
       if (priceMap.has(price)) {
         priceMap.set(price, priceMap.get(price) + quantity);

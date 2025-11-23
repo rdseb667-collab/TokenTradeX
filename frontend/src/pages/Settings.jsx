@@ -126,10 +126,10 @@ export default function Settings() {
   const handleGenerate2FA = async () => {
     try {
       setLoading(true);
-      const response = await api.post('/auth/2fa/generate');
-      setQrCode(response.data.qrCode);
-      setTwoFactorSecret(response.data.secret);
-      setBackupCodes(response.data.backupCodes || []);
+      const response = await api.post('/2fa/setup');
+      setQrCode(response.data.data.qrCode);
+      setTwoFactorSecret(response.data.data.secret);
+      setBackupCodes(response.data.data.backupCodes || []);
       setShow2FADialog(true);
     } catch (error) {
       toast.error('Failed to generate 2FA');
@@ -141,8 +141,7 @@ export default function Settings() {
   const handleEnable2FA = async () => {
     try {
       setLoading(true);
-      await api.post('/auth/2fa/enable', {
-        secret: twoFactorSecret,
+      await api.post('/2fa/verify', {
         token: twoFactorToken
       });
       toast.success('2FA enabled successfully! Save your backup codes.');
@@ -163,7 +162,7 @@ export default function Settings() {
     
     try {
       setLoading(true);
-      await api.post('/auth/2fa/disable', { token });
+      await api.post('/2fa/disable', { token });
       toast.success('2FA disabled');
       window.location.reload();
     } catch (error) {

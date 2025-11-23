@@ -1,3 +1,4 @@
+const { sequelize } = require('../config/database');
 const User = require('./User');
 const Token = require('./Token');
 const Wallet = require('./Wallet');
@@ -8,6 +9,23 @@ const StakingPosition = require('./StakingPosition');
 const SyntheticPosition = require('./SyntheticPosition');
 const DividendLottery = require('./DividendLottery');
 const AuditLog = require('./AuditLog');
+const CopyTradingSubscription = require('./CopyTradingSubscription');
+const ApiKey = require('./ApiKey');
+const NFTPosition = require('./NFTPosition');
+const LendingPosition = require('./LendingPosition');
+const WhiteLabelPartner = require('./WhiteLabelPartner');
+const RevenueStream = require('./RevenueStream');
+const RevenueEvent = require('./RevenueEvent');
+const RevenueLedger = require('./RevenueLedger');
+const FeeExemptAllowlist = require('./FeeExemptAllowlist');
+const PrivacyConsent = require('./PrivacyConsent');
+const DataDeletionRequest = require('./DataDeletionRequest');
+const DataAccessLog = require('./DataAccessLog');
+const AsyncJob = require('./AsyncJob');
+const UserReward = require('./UserReward');
+const FeePool = require('./FeePool');
+const FeePoolTransaction = require('./FeePoolTransaction');
+const PostTradeJob = require('./PostTradeJob');
 
 // User associations
 User.hasMany(Wallet, { foreignKey: 'userId', as: 'wallets' });
@@ -59,7 +77,72 @@ User.hasMany(DividendLottery, { foreignKey: 'winnerId', as: 'lotteryWins' });
 AuditLog.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 User.hasMany(AuditLog, { foreignKey: 'userId', as: 'auditLogs' });
 
+// CopyTradingSubscription associations
+CopyTradingSubscription.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+User.hasMany(CopyTradingSubscription, { foreignKey: 'userId', as: 'copyTradingSubscriptions' });
+
+// ApiKey associations
+ApiKey.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+User.hasMany(ApiKey, { foreignKey: 'userId', as: 'apiKeys' });
+
+// NFTPosition associations
+NFTPosition.belongsTo(User, { foreignKey: 'originalOwnerId', as: 'originalOwner' });
+NFTPosition.belongsTo(User, { foreignKey: 'currentOwnerId', as: 'currentOwner' });
+User.hasMany(NFTPosition, { foreignKey: 'originalOwnerId', as: 'createdNFTs' });
+User.hasMany(NFTPosition, { foreignKey: 'currentOwnerId', as: 'ownedNFTs' });
+
+// LendingPosition associations
+LendingPosition.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+LendingPosition.belongsTo(Token, { foreignKey: 'tokenId', as: 'token' });
+LendingPosition.belongsTo(Token, { foreignKey: 'collateralTokenId', as: 'collateralToken' });
+User.hasMany(LendingPosition, { foreignKey: 'userId', as: 'lendingPositions' });
+Token.hasMany(LendingPosition, { foreignKey: 'tokenId', as: 'lendingPositions' });
+
+// WhiteLabelPartner associations
+WhiteLabelPartner.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+WhiteLabelPartner.belongsTo(ApiKey, { foreignKey: 'apiKeyId', as: 'apiKey' });
+User.hasMany(WhiteLabelPartner, { foreignKey: 'userId', as: 'whiteLabelPartnerships' });
+ApiKey.hasOne(WhiteLabelPartner, { foreignKey: 'apiKeyId', as: 'whiteLabelPartner' });
+
+// RevenueEvent associations
+RevenueEvent.belongsTo(RevenueStream, { foreignKey: 'streamId', as: 'stream' });
+RevenueStream.hasMany(RevenueEvent, { foreignKey: 'streamId', as: 'events' });
+
+// RevenueLedger associations
+RevenueLedger.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+User.hasMany(RevenueLedger, { foreignKey: 'userId', as: 'revenueLedger' });
+
+// FeeExemptAllowlist associations
+FeeExemptAllowlist.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+User.hasOne(FeeExemptAllowlist, { foreignKey: 'userId', as: 'feeExemption' });
+
+// PrivacyConsent associations
+PrivacyConsent.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+User.hasMany(PrivacyConsent, { foreignKey: 'userId', as: 'privacyConsents' });
+
+// DataDeletionRequest associations
+DataDeletionRequest.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+User.hasMany(DataDeletionRequest, { foreignKey: 'userId', as: 'deletionRequests' });
+
+// DataAccessLog associations
+DataAccessLog.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+DataAccessLog.belongsTo(User, { foreignKey: 'accessedBy', as: 'accessor' });
+User.hasMany(DataAccessLog, { foreignKey: 'userId', as: 'dataAccessLogs' });
+
+// UserReward associations
+UserReward.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+User.hasMany(UserReward, { foreignKey: 'userId', as: 'rewards' });
+
+// FeePoolTransaction associations
+FeePoolTransaction.belongsTo(FeePool, { foreignKey: 'poolId', as: 'pool' });
+FeePool.hasMany(FeePoolTransaction, { foreignKey: 'poolId', as: 'transactions' });
+
+// PostTradeJob associations
+PostTradeJob.belongsTo(Trade, { foreignKey: 'tradeId', as: 'trade' });
+Trade.hasMany(PostTradeJob, { foreignKey: 'tradeId', as: 'postTradeJobs' });
+
 module.exports = {
+  sequelize,
   User,
   Token,
   Wallet,
@@ -69,5 +152,22 @@ module.exports = {
   StakingPosition,
   SyntheticPosition,
   DividendLottery,
-  AuditLog
+  AuditLog,
+  CopyTradingSubscription,
+  ApiKey,
+  NFTPosition,
+  LendingPosition,
+  WhiteLabelPartner,
+  RevenueStream,
+  RevenueEvent,
+  RevenueLedger,
+  FeeExemptAllowlist,
+  PrivacyConsent,
+  DataDeletionRequest,
+  DataAccessLog,
+  AsyncJob,
+  UserReward,
+  FeePool,
+  FeePoolTransaction,
+  PostTradeJob
 };

@@ -124,4 +124,17 @@ const requireSuperAdmin = (req, res, next) => {
   next();
 };
 
-module.exports = { protect, authorize, require2FA, requireSuperAdmin };
+/**
+ * Middleware to restrict access to admin or super_admin
+ */
+const adminOnly = (req, res, next) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'super_admin') {
+    return res.status(403).json({
+      success: false,
+      message: 'Administrator access required'
+    });
+  }
+  next();
+};
+
+module.exports = { protect, authorize, require2FA, requireSuperAdmin, adminOnly };

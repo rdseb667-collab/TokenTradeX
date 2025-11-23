@@ -1,166 +1,140 @@
-import { useEffect, useRef } from 'react';
-import { Box, Paper, ToggleButtonGroup, ToggleButton, Typography, IconButton } from '@mui/material';
-import { ShowChart, Fullscreen, CandlestickChart } from '@mui/icons-material';
-import { createChart } from 'lightweight-charts';
+import { useEffect, useRef, useState } from 'react';
+import { Box, Paper, ToggleButtonGroup, ToggleButton, Typography, IconButton, CircularProgress, Alert } from '@mui/material';
+import { ShowChart, Fullscreen } from '@mui/icons-material';
+
+// Symbol mapping for TradingView
+const SYMBOL_MAP = {
+  'BTC': 'BTCUSD',
+  'ETH': 'ETHUSD',
+  'BNB': 'BNBUSD',
+  'SOL': 'SOLUSD',
+  'USDT': 'USDTUSD',
+  'TTX': 'BTCUSD', // Fallback to BTC for custom token
+};
+
+// Timeframe mapping for TradingView
+const TIMEFRAME_MAP = {
+  '1H': '60',
+  '1D': 'D',
+  '1W': 'W',
+  '1M': 'M',
+};
 
 export default function TradingViewChart({ token }) {
-  const chartContainerRef = useRef(null);
-  const chartRef = useRef(null);
-  const seriesRef = useRef(null);
+  const containerRef = useRef(null);
+  const widgetRef = useRef(null);
+  const [timeframe, setTimeframe] = useState('1D');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (!token || !chartContainerRef.current) return;
+    if (!token || !containerRef.current) return;
 
-    // Create chart
-    const chart = createChart(chartContainerRef.current, {
-      layout: {
-        background: { color: '#0a0e14' },
-        textColor: '#9ca3af',
-      },
-      grid: {
-        vertLines: { color: '#1f2937' },
-        horzLines: { color: '#1f2937' },
-      },
-      width: chartContainerRef.current.clientWidth,
-      height: 500,
-      crosshair: {
-        mode: 1, // Magnet mode - snaps to data points
-        vertLine: {
-          width: 1,
-          color: '#9ca3af',
-          style: 3, // Dashed
-        },
-        horzLine: {
-          width: 1,
-          color: '#9ca3af',
-          style: 3,
-        },
-      },
-      timeScale: {
-        borderColor: '#1f2937',
-        timeVisible: true,
-        secondsVisible: false,
-      },
-      rightPriceScale: {
-        borderColor: '#1f2937',
-        scaleMargins: {
-          top: 0.1,
-          bottom: 0.2,
-        },
-      },
-    });
+    setLoading(true);
+    setError(null);
 
-    // Generate realistic candlestick data
-    const basePrice = parseFloat(token.currentPrice);
-    const now = Math.floor(Date.now() / 1000);
-    const data = [];
-    
-    let currentPrice = basePrice * 0.95; // Start lower
-    for (let i = 390; i >= 0; i--) {
-      const time = now - (i * 60); // 1-minute candles
-      const volatility = basePrice * 0.002;
-      
-      const open = currentPrice;
-      const change = (Math.random() - 0.48) * volatility; // Slight upward bias
-      const close = open + change;
-      const high = Math.max(open, close) + Math.random() * volatility * 0.5;
-      const low = Math.min(open, close) - Math.random() * volatility * 0.5;
-      
-      data.push({
-        time,
-        open: parseFloat(open.toFixed(2)),
-        high: parseFloat(high.toFixed(2)),
-        low: parseFloat(low.toFixed(2)),
-        close: parseFloat(close.toFixed(2)),
-      });
-      
-      currentPrice = close;
-    }
+    // Lazy-load TradingView widget script
+    const script = document.createElement('script');
+    script.src = 'https://s3.tradingview.com/tv.js';
+    script.async = true;
+    script.onload = () => {
+      try {
+        // Clear previous widget
+        if (widgetRef.current) {
+          containerRef.current.innerHTML = '';
+        }
 
-    // Add candlestick series
-    const candlestickSeries = chart.addCandlestickSeries({
-      upColor: '#00ff88',
-      downColor: '#ff3366',
-      borderUpColor: '#00ff88',
-      borderDownColor: '#ff3366',
-      wickUpColor: '#00ff88',
-      wickDownColor: '#ff3366',
-    });
+        const tvSymbol = SYMBOL_MAP[token.symbol] || 'BTCUSD';
 
-    candlestickSeries.setData(data);
-
-    // Add volume histogram
-    const volumeSeries = chart.addHistogramSeries({
-      color: '#26a69a',
-      priceFormat: {
-        type: 'volume',
-      },
-      priceScaleId: '',
-      scaleMargins: {
-        top: 0.8,
-        bottom: 0,
-      },
-    });
-
-    const volumeData = data.map(d => ({
-      time: d.time,
-      value: Math.random() * 1000000 + 500000,
-      color: d.close >= d.open ? 'rgba(0, 255, 136, 0.3)' : 'rgba(255, 51, 102, 0.3)'
-    }));
-
-    volumeSeries.setData(volumeData);
-
-    // Fit content nicely
-    chart.timeScale().fitContent();
-
-    // Handle window resize
-    const handleResize = () => {
-      if (chartContainerRef.current) {
-        chart.applyOptions({ 
-          width: chartContainerRef.current.clientWidth 
+        // Initialize TradingView widget
+        widgetRef.current = new window.TradingView.widget({
+          autosize: true,
+          symbol: tvSymbol,
+          interval: TIMEFRAME_MAP[timeframe],
+          timezone: 'Etc/UTC',
+          theme: 'dark',
+          style: '1', // Candlestick
+          locale: 'en',
+          toolbar_bg: '#0a0e14',
+          enable_publishing: false,
+          hide_side_toolbar: true,
+          allow_symbol_change: false,
+          save_image: false,
+          container_id: containerRef.current.id,
+          backgroundColor: '#0a0e14',
+          gridColor: '#1f2937',
+          hide_top_toolbar: false,
+          hide_legend: false,
+          studies: [],
+          disabled_features: [
+            'use_localstorage_for_settings',
+            'volume_force_overlay',
+            'create_volume_indicator_by_default',
+          ],
+          enabled_features: ['hide_left_toolbar_by_default'],
+          overrides: {
+            'mainSeriesProperties.candleStyle.upColor': '#00ff88',
+            'mainSeriesProperties.candleStyle.downColor': '#ff3366',
+            'mainSeriesProperties.candleStyle.borderUpColor': '#00ff88',
+            'mainSeriesProperties.candleStyle.borderDownColor': '#ff3366',
+            'mainSeriesProperties.candleStyle.wickUpColor': '#00ff88',
+            'mainSeriesProperties.candleStyle.wickDownColor': '#ff3366',
+            'paneProperties.background': '#0a0e14',
+            'paneProperties.backgroundType': 'solid',
+            'paneProperties.vertGridProperties.color': '#1f2937',
+            'paneProperties.horzGridProperties.color': '#1f2937',
+          },
         });
+
+        setLoading(false);
+      } catch (err) {
+        console.error('TradingView widget error:', err);
+        setError('Failed to load chart');
+        setLoading(false);
       }
     };
 
-    window.addEventListener('resize', handleResize);
+    script.onerror = () => {
+      setError('Failed to load TradingView script');
+      setLoading(false);
+    };
 
-    // Live price updates
-    const updateInterval = setInterval(() => {
-      const lastCandle = data[data.length - 1];
-      const newClose = lastCandle.close + (Math.random() - 0.5) * (basePrice * 0.002);
-      const newTime = Math.floor(Date.now() / 1000);
-      
-      const newCandle = {
-        time: newTime,
-        open: lastCandle.close,
-        high: Math.max(lastCandle.close, newClose),
-        low: Math.min(lastCandle.close, newClose),
-        close: newClose,
-      };
-      
-      candlestickSeries.update(newCandle);
-      volumeSeries.update({
-        time: newTime,
-        value: Math.random() * 1000000 + 500000,
-        color: newClose >= lastCandle.close ? 'rgba(0, 255, 136, 0.3)' : 'rgba(255, 51, 102, 0.3)'
-      });
-    }, 5000);
-
-    chartRef.current = chart;
-    seriesRef.current = candlestickSeries;
+    document.head.appendChild(script);
 
     return () => {
-      window.removeEventListener('resize', handleResize);
-      clearInterval(updateInterval);
-      chart.remove();
+      // Safe cleanup: check if widget exists and has a valid DOM parent
+      if (widgetRef.current) {
+        try {
+          if (typeof widgetRef.current.remove === 'function') {
+            widgetRef.current.remove();
+          }
+        } catch (err) {
+          // Silently ignore - widget may already be destroyed
+          console.debug('TradingView cleanup skipped:', err.message);
+        }
+        widgetRef.current = null;
+      }
+      
+      // Clean container
+      if (containerRef.current) {
+        containerRef.current.innerHTML = '';
+      }
+      
+      // Remove script safely
+      if (script && script.parentNode) {
+        script.remove();
+      }
     };
-  }, [token]);
+  }, [token, timeframe]);
 
   if (!token) return null;
 
   const displayPrice = parseFloat(token.currentPrice);
   const displayChange = parseFloat(token.priceChange24h) || 0;
   const isPositive = displayChange >= 0;
+
+  // Generate unique container ID
+  const containerId = `tradingview_${token.symbol}_${Date.now()}`;
 
   return (
     <Paper elevation={0} sx={{ border: '1px solid #1f2937', height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -229,7 +203,56 @@ export default function TradingViewChart({ token }) {
       </Box>
 
       {/* Chart Container */}
-      <Box ref={chartContainerRef} sx={{ flex: 1, position: 'relative' }} />
+      <Box sx={{ flex: 1, position: 'relative', minHeight: 400 }}>
+        {loading && (
+          <Box sx={{ 
+            position: 'absolute', 
+            top: 0, 
+            left: 0, 
+            right: 0, 
+            bottom: 0, 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center',
+            bgcolor: '#0a0e14',
+            zIndex: 10
+          }}>
+            <CircularProgress size={40} sx={{ color: '#00ff88' }} />
+          </Box>
+        )}
+        
+        {error && (
+          <Box sx={{ 
+            position: 'absolute', 
+            top: 0, 
+            left: 0, 
+            right: 0, 
+            bottom: 0, 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center',
+            bgcolor: '#0a0e14',
+            p: 3,
+            zIndex: 10
+          }}>
+            <Alert severity="error" sx={{ bgcolor: '#1f2937', color: '#ff3366' }}>
+              {error}
+            </Alert>
+          </Box>
+        )}
+
+        <Box 
+          id={containerId} 
+          ref={containerRef}
+          sx={{ 
+            width: '100%', 
+            height: '100%',
+            minHeight: 400,
+            opacity: loading || error ? 0 : 1,
+            transition: 'opacity 0.3s ease'
+          }} 
+        />
+      </Box>
     </Paper>
   );
 }

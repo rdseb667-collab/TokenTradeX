@@ -41,7 +41,7 @@ export default function PriceChart({ token }) {
         
         setChartData(formattedData);
       } catch (error) {
-        console.error('Failed to fetch chart data:', error);
+        // Silently fail for tokens without external price data
       } finally {
         setLoading(false);
       }
@@ -53,7 +53,7 @@ export default function PriceChart({ token }) {
         const response = await api.get(`/prices/${token.symbol}/live`);
         setLivePrice(response.data.data);
       } catch (error) {
-        console.error('Failed to fetch live price:', error);
+        // Use database price for tokens without external feeds
       }
     };
 

@@ -219,7 +219,14 @@ class StakingService {
 
       // Calculate final rewards
       const { newRewards } = await this.calculateRewards(positionId);
-      const totalAmount = parseFloat(position.amount) + newRewards;
+      const totalRewards = parseFloat(position.rewardsAccumulated) + newRewards;
+      
+      // Calculate staking commission (Stream #6)
+      const stakingCommissionPercent = parseFloat(process.env.STAKING_COMMISSION_PERCENT || 10); // 10% default
+      const stakingCommission = totalRewards * (stakingCommissionPercent / 100);
+      const netRewards = totalRewards - stakingCommission;
+      
+      const totalAmount = parseFloat(position.amount) + netRewards;
 
       // Get wallet
       const wallet = await Wallet.findOne({
@@ -254,15 +261,33 @@ class StakingService {
         balanceAfter,
         status: 'completed',
         reference: `unstake_${position.id}`,
-        notes: `Unstaked ${position.amount} + ${parseFloat(position.rewardsAccumulated) + newRewards} rewards`
+        notes: `Unstaked ${position.amount} + ${netRewards.toFixed(4)} rewards (${stakingCommission.toFixed(4)} commission)`
       }, { transaction });
+
+      // Collect staking commission revenue (Stream #6)
+      const stakingCommissionUSD = stakingCommission * parseFloat(position.Token.currentPrice);
+      const revenueCollector = require('../helpers/revenueCollector');
+      setImmediate(async () => {
+        try {
+          await revenueCollector.collectRevenue(
+            6, 
+            stakingCommissionUSD, 
+            `Staking rewards: ${totalRewards.toFixed(4)} ${position.Token.symbol}`
+          );
+          console.log(`💎 Staking commission collected: $${stakingCommissionUSD.toFixed(2)} (${stakingCommission.toFixed(4)} ${position.Token.symbol})`);
+        } catch (error) {
+          console.error('Failed to collect staking commission:', error.message);
+        }
+      });
 
       await transaction.commit();
 
       return {
         success: true,
         principal: position.amount,
-        rewards: parseFloat(position.rewardsAccumulated) + newRewards,
+        grossRewards: totalRewards,
+        stakingCommission: stakingCommission,
+        netRewards: netRewards,
         total: totalAmount,
         message: `Successfully unstaked ${totalAmount} ${position.Token.symbol}`
       };
@@ -296,7 +321,8 @@ class StakingService {
       }
 
       // Calculate penalty
-      const penalty = parseFloat(position.amount) * StakingService.EARLY_WITHDRAWAL_PENALTY;
+      const earlyWithdrawalPenaltyPercent = parseFloat(process.env.EARLY_UNSTAKING_FEE_PERCENT || 2.0); // 2% default
+      const penalty = parseFloat(position.amount) * (earlyWithdrawalPenaltyPercent / 100);
       const amountToReturn = parseFloat(position.amount) - penalty;
 
       // Get wallet
@@ -325,6 +351,22 @@ class StakingService {
       // Redistribute penalty to other stakers (bonus rewards pool)
       await this.redistributePenalty(position.tokenId, penalty, transaction);
 
+      // Collect early unstaking fee as revenue (Stream #6)
+      const penaltyUSD = penalty * parseFloat(position.Token.currentPrice);
+      const revenueCollector = require('../helpers/revenueCollector');
+      setImmediate(async () => {
+        try {
+          await revenueCollector.collectRevenue(
+            6, 
+            penaltyUSD, 
+            `Early unstaking penalty: ${penalty.toFixed(4)} ${position.Token.symbol}`
+          );
+          console.log(`⚡ Early unstaking penalty collected: $${penaltyUSD.toFixed(2)} (${penalty.toFixed(4)} ${position.Token.symbol})`);
+        } catch (error) {
+          console.error('Failed to collect early unstaking penalty:', error.message);
+        }
+      });
+
       // Create transaction record
       await Transaction.create({
         userId,
@@ -335,7 +377,7 @@ class StakingService {
         balanceAfter,
         status: 'completed',
         reference: `emergency_withdraw_${position.id}`,
-        notes: `Emergency withdrawal with ${StakingService.EARLY_WITHDRAWAL_PENALTY * 100}% penalty (${penalty})`
+        notes: `Emergency withdrawal with ${earlyWithdrawalPenaltyPercent}% penalty (${penalty})`
       }, { transaction });
 
       await transaction.commit();

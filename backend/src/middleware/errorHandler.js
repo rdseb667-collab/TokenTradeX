@@ -1,6 +1,14 @@
 const errorHandler = (err, req, res, next) => {
   console.error('Error:', err);
 
+  // CORS error
+  if (err.message === 'Not allowed by CORS') {
+    return res.status(403).json({
+      success: false,
+      message: 'Origin not allowed'
+    });
+  }
+
   // Sequelize validation error
   if (err.name === 'SequelizeValidationError') {
     const errors = err.errors.map(e => ({
@@ -38,12 +46,26 @@ const errorHandler = (err, req, res, next) => {
     });
   }
 
-  // Default error
-  res.status(err.statusCode || 500).json({
+  // Payload too large
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({
+      success: false,
+      message: 'Request payload too large'
+    });
+  }
+
+  // Default error - never leak stack traces in production
+  const statusCode = err.statusCode || 500;
+  const response = {
     success: false,
-    message: err.message || 'Internal server error',
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
-  });
+    message: statusCode === 500 ? 'Internal server error' : err.message
+  };
+
+  if (process.env.NODE_ENV === 'development') {
+    response.stack = err.stack;
+  }
+
+  res.status(statusCode).json(response);
 };
 
 module.exports = errorHandler;

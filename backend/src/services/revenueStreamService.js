@@ -1,185 +1,223 @@
 const ttxReserveService = require('./ttxReserveService');
+const ethConversionService = require('./ethConversionService');
 const logger = require('./logger');
+const prometheusMetrics = require('./prometheusMetrics');
+const { sequelize } = require('../config/database');
+const { RevenueStream, RevenueEvent } = require('../models');
 
 /**
- * Revenue Stream Service - Manages 10 revenue streams
- * 70% of ALL revenue goes to TTX holders (active usage incentive)
- * 30% goes to RESERVE FUND (backing increases = price appreciation)
+ * Revenue Stream Service - Phase 2 PERSISTENT VERSION
+ * 
+ * Now uses RevenueStream and RevenueEvent models for durability.
+ * 
+ * CLEAN SEPARATION (matches TTXUnified.sol):
+ * - TTX token fees → totalRevenueTTX (for staker rewards)
+ * - Cash/ETH fees → totalReserveETH (for buybacks)
+ * 
+ * SPLIT: 15% → TTX holders (fair rewards), 85% → Reserve (backing)
  * 
  * This creates the flywheel:
  * Usage → Revenue → Holder rewards + Reserve growth → Price up → More usage
+ * 
+ * NOTE: Backend tracks in USD for accounting, smart contract tracks separately:
+ * - TTX fees stay on-chain for auto-compound
+ * - ETH fees accumulate for buyback operations
  */
 class RevenueStreamService {
   constructor() {
-    this.revenueStreams = [
-      { 
-        id: 0, 
-        name: 'Trading Fees',
-        description: '0.15% fee on every trade',
-        collected: 0,
-        distributed: 0,
-        targetMonthly: 50000 // $50K/month target
-      },
-      { 
-        id: 1, 
-        name: 'Withdrawal Fees',
-        description: 'Small fee when users cash out',
-        collected: 0,
-        distributed: 0,
-        targetMonthly: 10000
-      },
-      { 
-        id: 2, 
-        name: 'Premium Subscriptions',
-        description: '$10-50/month for pro features',
-        collected: 0,
-        distributed: 0,
-        targetMonthly: 25000
-      },
-      { 
-        id: 3, 
-        name: 'API Licensing',
-        description: 'Other platforms pay to use our engine',
-        collected: 0,
-        distributed: 0,
-        targetMonthly: 100000 // B2B = big money
-      },
-      { 
-        id: 4, 
-        name: 'Market Making',
-        description: 'Earn spread from liquidity provision',
-        collected: 0,
-        distributed: 0,
-        targetMonthly: 75000
-      },
-      { 
-        id: 5, 
-        name: 'Lending Interest',
-        description: 'Users borrow, platform earns interest',
-        collected: 0,
-        distributed: 0,
-        targetMonthly: 40000
-      },
-      { 
-        id: 6, 
-        name: 'Staking Commissions',
-        description: 'Small % of staking rewards',
-        collected: 0,
-        distributed: 0,
-        targetMonthly: 30000
-      },
-      { 
-        id: 7, 
-        name: 'Copy Trading Fees',
-        description: 'Fee when copying successful traders',
-        collected: 0,
-        distributed: 0,
-        targetMonthly: 20000
-      },
-      { 
-        id: 8, 
-        name: 'White Label Licensing',
-        description: 'Monthly fees from other exchanges using our tech',
-        collected: 0,
-        distributed: 0,
-        targetMonthly: 150000 // Recurring B2B revenue
-      },
-      { 
-        id: 9, 
-        name: 'NFT Position Trading',
-        description: 'Fees from tokenized position marketplace',
-        collected: 0,
-        distributed: 0,
-        targetMonthly: 35000
-      }
-    ];
-    
-    this.holderSharePercentage = 0.15; // 15% to holders (fair & sustainable)
-    this.reserveFundPercentage = 0.30; // 30% to reserve (increases backing)
-    
-    // Reserve fund tracking
-    this.reserveFund = {
-      totalCollected: 0,
-      ttxBacking: 0, // Total USD backing each TTX
-      circulatingSupply: 500000000 // 500M TTX circulating
-    };
+    const hp = parseFloat(process.env.REVENUE_HOLDER_PERCENTAGE ?? '0.15');
+    const rp = parseFloat(process.env.REVENUE_RESERVE_PERCENTAGE ?? '0.85');
+    this.holderSharePercentage = isNaN(hp) ? 0.15 : hp; // 15% to holders (fair & sustainable)
+    this.reserveFundPercentage = isNaN(rp) ? 0.85 : rp; // 85% to reserve (strong backing)
+    this.circulatingSupply = 500000000; // 500M TTX circulating
   }
 
   /**
-   * Collect revenue from any stream
-   * 15% → TTX holders (fair rewards)
-   * 85% → Reserve fund (increases TTX backing/price)
+   * Collect revenue from any stream - Phase 2 PERSISTENT VERSION
+   * Records to RevenueEvent ledger for complete audit trail
+   * 15% → TTX holders
+   * 85% → Reserve fund
    */
-  async collectRevenue(streamId, amount, description = '') {
+  async collectRevenue(streamId, amount, description = '', sourceId = null) {
+    const transaction = await sequelize.transaction();
+    
     try {
-      if (streamId < 0 || streamId >= this.revenueStreams.length) {
+      if (streamId < 0 || streamId > 9) {
         throw new Error('Invalid stream ID');
       }
 
-      const stream = this.revenueStreams[streamId];
+      // Get stream from database
+      const stream = await RevenueStream.findByPk(streamId, { transaction });
+      if (!stream) {
+        throw new Error(`Revenue stream ${streamId} not found`);
+      }
+
       const holderShare = amount * this.holderSharePercentage;
       const reserveShare = amount * this.reserveFundPercentage;
 
-      // Update local tracking
-      stream.collected += amount;
-      stream.distributed += holderShare;
-      
-      // Add to reserve fund
-      this.reserveFund.totalCollected += reserveShare;
-      this.reserveFund.ttxBacking = this.reserveFund.totalCollected / this.reserveFund.circulatingSupply;
+      // Create revenue event (idempotent via unique index on source_type + source_id)
+      const sourceType = 'trade'; // Default, can be parameterized
+      const eventSourceId = sourceId || `${sourceType}-${Date.now()}-${Math.random()}`;
 
-      logger.info('Revenue collected - Flywheel active', {
+      try {
+        await RevenueEvent.create({
+          streamId,
+          sourceType,
+          sourceId: eventSourceId,
+          currency: 'USD',
+          grossAmount: amount,
+          netAmount: amount,
+          holderShare,
+          reserveShare,
+          description,
+          metadata: {
+            timestamp: new Date().toISOString(),
+            streamName: stream.name,
+            onChainDeliveryStatus: 'pending'
+          }
+        }, { transaction });
+      } catch (error) {
+        // If duplicate (unique constraint violation), skip silently (idempotent)
+        if (error.name === 'SequelizeUniqueConstraintError') {
+          logger.info('Revenue event already recorded (idempotent)', { sourceId: eventSourceId });
+          await transaction.rollback();
+          return { success: true, duplicate: true };
+        }
+        throw error;
+      }
+
+      // Update stream totals
+      await stream.increment({
+        collected: amount,
+        distributed: holderShare
+      }, { transaction });
+
+      await transaction.commit();
+
+      // Update Prometheus metrics
+      prometheusMetrics.updateRevenueMetrics(streamId, stream.name, 
+        parseFloat(stream.collected) + amount, 
+        parseFloat(stream.distributed) + holderShare
+      );
+      prometheusMetrics.recordRevenueEvent(streamId, stream.name, sourceType);
+
+      logger.info('✅ Revenue collected - Flywheel active', {
         stream: stream.name,
         totalAmount: amount,
         holderShare: holderShare,
         reserveShare: reserveShare,
-        newTTXBacking: this.reserveFund.ttxBacking.toFixed(6),
         description
       });
 
-      // Send to smart contract (holder share goes on-chain)
-      try {
-        await ttxReserveService.collectRevenue(streamId, holderShare);
-      } catch (error) {
-        logger.warn('Smart contract revenue collection failed, tracking locally', {
-          error: error.message
-        });
-      }
+      // Send to smart contract (holder share goes on-chain) - ASYNC
+      setImmediate(async () => {
+        let deliveryStatus = 'pending';
+        try {
+          // Only invoke on-chain when in production and contract is configured
+          if (process.env.CONTRACT_MODE === 'production' && process.env.TTX_TOKEN_ADDRESS) {
+            // Convert USD holder share to ETH before sending
+            const holderShareETH = await ethConversionService.convertUsdToEth(holderShare);
+            logger.info('💰 Sending on-chain holder share', { holderShareUSD: holderShare, holderShareETH });
+            await ttxReserveService.collectRevenue(streamId, holderShareETH, true);
+            deliveryStatus = 'delivered';
+            
+            // Update event metadata with success
+            await RevenueEvent.update(
+              { 
+                metadata: sequelize.fn(
+                  'jsonb_set',
+                  sequelize.fn(
+                    'jsonb_set',
+                    sequelize.col('metadata'),
+                    '{onChainDeliveryStatus}',
+                    JSON.stringify('delivered')
+                  ),
+                  '{deliveredAt}',
+                  JSON.stringify(new Date().toISOString())
+                )
+              },
+              { where: { sourceId: eventSourceId } }
+            );
+          } else {
+            logger.info('⚠️ On-chain holder share skipped', { 
+              holderShareUSD: holderShare,
+              mode: process.env.CONTRACT_MODE || 'development',
+              reason: !process.env.TTX_TOKEN_ADDRESS ? 'Contract not configured' : 'Not in production mode'
+            });
+          }
+        } catch (error) {
+          deliveryStatus = 'failed';
+          logger.warn('Smart contract revenue collection failed, tracking locally', {
+            error: error.message,
+            eventSourceId
+          });
+          
+          // Update event metadata with failure details
+          await RevenueEvent.update(
+            { 
+              metadata: sequelize.fn(
+                'jsonb_set',
+                sequelize.fn(
+                  'jsonb_set',
+                  sequelize.fn(
+                    'jsonb_set',
+                    sequelize.col('metadata'),
+                    '{onChainDeliveryStatus}',
+                    JSON.stringify('failed')
+                  ),
+                  '{retryAttempts}',
+                  '0'
+                ),
+                '{lastError}',
+                JSON.stringify(error.message)
+              )
+            },
+            { where: { sourceId: eventSourceId } }
+          );
+        }
+      });
 
       return {
         success: true,
         streamName: stream.name,
         totalCollected: amount,
         holderShare,
-        reserveShare,
-        ttxBacking: this.reserveFund.ttxBacking,
-        flywheelEffect: `Reserve backing increased from usage. TTX now backed by $${this.reserveFund.ttxBacking.toFixed(6)} per token`
+        reserveShare
       };
     } catch (error) {
-      logger.error('Failed to collect revenue', { error: error.message });
+      await transaction.rollback();
+      logger.error('❌ Failed to collect revenue', { error: error.message, stack: error.stack });
       throw error;
     }
   }
 
   /**
-   * Get reserve fund status
-   * Shows how usage drives price appreciation
+   * Get reserve fund status - Phase 2 VERSION
+   * Calculates from persisted data
    */
-  getReserveFundStatus() {
+  async getReserveFundStatus() {
+    const streams = await RevenueStream.findAll();
+    const totalReserveCollected = streams.reduce((sum, s) => sum + parseFloat(s.collected || 0), 0) * this.reserveFundPercentage;
+    const ttxBacking = totalReserveCollected / this.circulatingSupply;
+
+    // Update Prometheus metrics for reserve
+    prometheusMetrics.updateReserveMetrics(totalReserveCollected, ttxBacking);
+
     return {
-      totalReserveCollected: this.reserveFund.totalCollected,
-      ttxBackingPerToken: this.reserveFund.ttxBacking,
-      circulatingSupply: this.reserveFund.circulatingSupply,
-      impliedMinPrice: this.reserveFund.ttxBacking, // Minimum price based on backing
-      message: `Each TTX is backed by $${this.reserveFund.ttxBacking.toFixed(6)} in reserve. Active usage increases this backing.`
+      totalReserveCollected,
+      ttxBackingPerToken: ttxBacking,
+      circulatingSupply: this.circulatingSupply,
+      impliedMinPrice: ttxBacking,
+      message: `Each TTX is backed by $${ttxBacking.toFixed(6)} in reserve. Active usage increases this backing.`
     };
   }
   
   /**
-   * Show the flywheel effect to users
+   * Show the flywheel effect - Phase 2 VERSION
    */
-  getFlywheelMetrics() {
-    const totalRevenue = this.revenueStreams.reduce((sum, s) => sum + s.collected, 0);
+  async getFlywheelMetrics() {
+    const streams = await RevenueStream.findAll();
+    const totalRevenue = streams.reduce((sum, s) => sum + parseFloat(s.collected || 0), 0);
     const holderEarnings = totalRevenue * this.holderSharePercentage;
     const reserveGrowth = totalRevenue * this.reserveFundPercentage;
     
@@ -192,9 +230,9 @@ class RevenueStreamService {
       },
       priceAppreciation: {
         reserveGrowth: reserveGrowth,
-        backingIncrease: (reserveGrowth / this.reserveFund.circulatingSupply).toFixed(6),
+        backingIncrease: (reserveGrowth / this.circulatingSupply).toFixed(6),
         percentage: '85%',
-        message: 'Reserve backing grows, supporting higher prices'
+        message: 'Reserve backing grows strongly, supporting higher prices'
       },
       flywheelEffect: [
         '1. You use platform → Revenue generated',
@@ -203,8 +241,36 @@ class RevenueStreamService {
         '4. Higher backing → TTX price rises',
         '5. Your holdings worth more → You use more',
         '6. Cycle repeats → Sustainable growth'
-      ]
+      ],
+      streams: streams.map(s => ({
+        id: s.id,
+        name: s.name,
+        collected: parseFloat(s.collected || 0),
+        distributed: parseFloat(s.distributed || 0),
+        targetMonthly: parseFloat(s.targetMonthly || 0),
+        progress: parseFloat(s.collected || 0) / parseFloat(s.targetMonthly || 1) * 100
+      }))
     };
+  }
+
+  /**
+   * Get all revenue streams from database
+   */
+  async getAllStreams() {
+    return await RevenueStream.findAll({
+      order: [['id', 'ASC']]
+    });
+  }
+
+  /**
+   * Get revenue events for a stream
+   */
+  async getStreamEvents(streamId, limit = 100) {
+    return await RevenueEvent.findAll({
+      where: { streamId },
+      order: [['createdAt', 'DESC']],
+      limit
+    });
   }
 
   /**

@@ -241,11 +241,11 @@ contract RWATokenFactory is Ownable, ReentrancyGuard, Pausable {
         uint256 fee = (amount * asset.platformFeeBps) / 10000;
         uint256 netAmount = amount - fee;
         
-        // Execute transfer
-        RWAToken(token).transferFrom(msg.sender, to, netAmount);
+        // Execute transfer through factory
+        RWAToken(token).factoryTransfer(msg.sender, to, netAmount);
         
         if (fee > 0) {
-            RWAToken(token).transferFrom(msg.sender, address(this), fee);
+            RWAToken(token).factoryTransfer(msg.sender, address(this), fee);
             totalPlatformRevenue += fee;
             emit PlatformFeeCollected(token, fee);
         }
@@ -380,6 +380,11 @@ contract RWATokenFactory is Ownable, ReentrancyGuard, Pausable {
         return total;
     }
     
+    // Check if factory is paused - used by RWAToken contract
+    function checkPaused() external view {
+        require(!paused(), "Factory is paused");
+    }
+    
     // ==================== EMERGENCY ====================
     
     function pause() external onlyOwner {
@@ -412,14 +417,34 @@ contract RWAToken is ERC20 {
         _mint(_factory, totalSupply);
     }
     
-    // Only factory can mint/burn (for rebalancing)
+    // Restrict direct transfers - only factory can move tokens
+    function transfer(address to, uint256 amount) public override returns (bool) {
+        require(msg.sender == factory, "Only factory can transfer tokens");
+        return super.transfer(to, amount);
+    }
+    
+    function transferFrom(address from, address to, uint256 amount) public override returns (bool) {
+        require(msg.sender == factory, "Only factory can transfer tokens");
+        return super.transferFrom(from, to, amount);
+    }
+    
+    // Factory-only transfer function with pause check
+    function factoryTransfer(address from, address to, uint256 amount) external {
+        require(msg.sender == factory, "Only factory");
+        RWATokenFactory(factory).checkPaused();
+        _transfer(from, to, amount);
+    }
+    
+    // Only factory can mint/burn (for rebalancing) with pause check
     function mint(address to, uint256 amount) external {
         require(msg.sender == factory, "Only factory");
+        RWATokenFactory(factory).checkPaused();
         _mint(to, amount);
     }
     
     function burn(uint256 amount) external {
         require(msg.sender == factory, "Only factory");
+        RWATokenFactory(factory).checkPaused();
         _burn(msg.sender, amount);
     }
 }

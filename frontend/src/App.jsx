@@ -27,6 +27,9 @@ import DividendLottery from './pages/DividendLottery';
 import Settings from './pages/Settings';
 import Margin from './pages/Margin';
 import CopyTrading from './pages/CopyTrading';
+import HelpCenter from './pages/HelpCenter';
+import RevenueStreams from './pages/RevenueStreams';
+import VolumeRebates from './pages/VolumeRebates';
 
 // Admin Pages
 import AdminDashboard from './pages/admin/AdminDashboard';
@@ -95,6 +98,12 @@ function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         
+        {/* LEGACY REDIRECTS */}
+        <Route path="/dashboard" element={<Navigate to="/app/dashboard" replace />} />
+        <Route path="/trading" element={<Navigate to="/app/trading" replace />} />
+        <Route path="/wallet" element={<Navigate to="/app/wallet" replace />} />
+        <Route path="/orders" element={<Navigate to="/app/orders" replace />} />
+        
         {/* PROTECTED ROUTES - Require login */}
         <Route
           path="/app"
@@ -114,12 +123,16 @@ function App() {
           <Route path="orders" element={<Orders />} />
           <Route path="subscriptions" element={<Subscriptions />} />
           <Route path="my-earnings" element={<UserEarnings />} />
+          <Route path="volume-rebates" element={<VolumeRebates />} />
           <Route path="settings" element={<Settings />} />
           <Route path="margin" element={<Margin />} />
           <Route path="copy-trading" element={<CopyTrading />} />
+          <Route path="revenue-streams" element={<RevenueStreams />} />
+          <Route path="help" element={<HelpCenter />} />
           
           {/* Admin Routes - Protected */}
-          <Route path="admin" element={<AdminDashboard />} />
+          <Route path="admin" element={<Admin />} />
+          <Route path="admin/dashboard" element={<AdminDashboard />} />
           <Route path="admin/rwa-assets" element={<RWAAssetManager />} />
           <Route path="admin/fractional" element={<FractionalControls />} />
           <Route path="admin/automation" element={<AutomationDashboard />} />

@@ -30,9 +30,19 @@ class WhaleProtectionService {
 
   /**
    * Check if wallet can hold more of this token
+   * @param {string} userId - User ID
+   * @param {string} tokenId - Token ID
+   * @param {number} additionalAmount - Amount to add
+   * @param {string} userRole - User role (super_admin, admin, user)
    */
-  async checkPositionLimit(userId, tokenId, additionalAmount) {
+  async checkPositionLimit(userId, tokenId, additionalAmount, userRole = 'user') {
     try {
+      // Super admins bypass whale protection limits
+      if (userRole === 'super_admin') {
+        console.log('🔓 Super admin bypassing whale protection');
+        return { allowed: true, exempted: true };
+      }
+
       const token = await Token.findByPk(tokenId);
       if (!token) throw new Error('Token not found');
 
@@ -44,13 +54,17 @@ class WhaleProtectionService {
       const newBalance = currentBalance + parseFloat(additionalAmount);
       const totalSupply = parseFloat(token.totalSupply);
       
+      const maxAllowedBalance = (totalSupply * this.LIMITS.MAX_WALLET_PERCENTAGE) / 100;
       const percentageOfSupply = (newBalance / totalSupply) * 100;
 
       if (percentageOfSupply > this.LIMITS.MAX_WALLET_PERCENTAGE) {
+        // Calculate how much MORE they can buy (never negative)
+        const remainingCapacity = Math.max(0, maxAllowedBalance - currentBalance);
+        
         return {
           allowed: false,
           reason: `Position limit exceeded. Maximum ${this.LIMITS.MAX_WALLET_PERCENTAGE}% of token supply per wallet`,
-          maxAllowed: (totalSupply * this.LIMITS.MAX_WALLET_PERCENTAGE / 100) - currentBalance
+          maxAllowed: remainingCapacity
         };
       }
 
@@ -118,9 +132,18 @@ class WhaleProtectionService {
 
   /**
    * Circuit breaker - pause trading if price moves too fast
+   * @param {string} tokenId - Token ID
+   * @param {number} currentPrice - Current price to check
+   * @param {string} userRole - User role (super_admin, admin, user)
    */
-  async checkCircuitBreaker(tokenId, currentPrice) {
+  async checkCircuitBreaker(tokenId, currentPrice, userRole = 'user') {
     try {
+      // Super admins bypass circuit breaker
+      if (userRole === 'super_admin') {
+        console.log('🔓 Super admin bypassing circuit breaker');
+        return { active: false, exempted: true };
+      }
+
       const token = await Token.findByPk(tokenId);
       if (!token) return { active: false };
 

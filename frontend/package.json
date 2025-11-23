@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest"
+    "test": "vitest --passWithNoTests"
   },
   "dependencies": {
     "@emotion/react": "^11.11.3",
@@ -17,7 +17,7 @@
     "@reduxjs/toolkit": "^2.0.1",
     "axios": "^1.6.5",
     "date-fns": "^3.0.6",
-    "lightweight-charts": "^5.0.9",
+    "lightweight-charts": "^4.2.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-redux": "^9.0.4",

@@ -3,58 +3,54 @@ const { sequelize } = require('../config/database');
 
 const UserReward = sequelize.define('UserReward', {
   id: {
-    type: DataTypes.INTEGER,
-    primaryKey: true,
-    autoIncrement: true
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true
   },
   userId: {
     type: DataTypes.UUID,
     allowNull: false,
-    field: 'user_id',
     references: {
       model: 'users',
       key: 'id'
     }
   },
   rewardType: {
-    type: DataTypes.ENUM(
-      'daily_login',
-      'first_trade',
-      'trading_volume',
-      'referral_bonus',
-      'community_contribution',
-      'milestone'
-    ),
+    type: DataTypes.STRING(50),
     allowNull: false,
-    field: 'reward_type'
+    comment: 'daily_login, trading_volume, milestone, referral, etc.'
   },
   amount: {
-    type: DataTypes.DECIMAL(18, 8),
+    type: DataTypes.DECIMAL(20, 8),
     allowNull: false,
     defaultValue: 0
   },
   description: {
-    type: DataTypes.STRING,
+    type: DataTypes.TEXT,
     allowNull: true
   },
   claimed: {
     type: DataTypes.BOOLEAN,
-    defaultValue: false
+    defaultValue: false,
+    allowNull: false
   },
   claimedAt: {
     type: DataTypes.DATE,
-    allowNull: true,
-    field: 'claimed_at'
+    allowNull: true
   },
-  expiresAt: {
-    type: DataTypes.DATE,
+  metadata: {
+    type: DataTypes.JSONB,
     allowNull: true,
-    field: 'expires_at'
+    comment: 'Additional context (tradeId, volume, tier, etc.)'
   }
 }, {
   tableName: 'user_rewards',
-  timestamps: true,
-  underscored: true
+  indexes: [
+    { fields: ['user_id'] },
+    { fields: ['reward_type'] },
+    { fields: ['claimed'] },
+    { fields: ['created_at'] }
+  ]
 });
 
 module.exports = UserReward;

@@ -1,8 +1,22 @@
 const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
-const { Order, Wallet, Token, User } = require('../models');
+const { Order, Wallet, Token, User, UserReward } = require('../models');
 const { Op } = require('sequelize');
+const tradingMiningService = require('../services/tradingMiningService');
+
+// Shared query definitions for consistency
+const ORDER_ATTRIBUTES = ['price', 'filledQuantity', 'quantity'];
+const TOKEN_INCLUDE = {
+  model: Token,
+  as: 'token',
+  attributes: ['symbol', 'name']
+};
+const TOKEN_SYMBOL_INCLUDE = {
+  model: Token,
+  as: 'token',
+  attributes: ['symbol']
+};
 
 /**
  * GET /api/earnings/summary
@@ -23,53 +37,72 @@ router.get('/summary', protect, async (req, res) => {
     const circulatingSupply = 500000000;
     const userSharePercent = ttxHoldings / circulatingSupply;
 
-    // Get platform volume today
+    // Get all filled orders in one query for the last 7 days
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    sevenDaysAgo.setHours(0, 0, 0, 0);
+
+    const allRecentOrders = await Order.findAll({
+      where: {
+        status: 'filled',
+        updatedAt: { [Op.gte]: sevenDaysAgo }
+      },
+      include: [TOKEN_INCLUDE],
+      order: [['updatedAt', 'DESC']]
+    });
+
+    // Date boundaries
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
-    const todayOrders = await Order.findAll({
-      where: {
-        status: 'filled',
-        updatedAt: { [Op.gte]: today }
-      }
-    });
-
-    const platformVolumeToday = todayOrders.reduce((sum, order) => {
-      return sum + (parseFloat(order.price) * parseFloat(order.filled_quantity || order.quantity));
-    }, 0);
-
-    // Calculate fees (0.1% trading fee)
-    const feesGeneratedToday = platformVolumeToday * 0.001;
-    const holderShareToday = feesGeneratedToday * 0.15; // 15% to holders
-    const yourShareToday = holderShareToday * userSharePercent;
-
-    // Get this month's volume
     const thisMonth = new Date();
     thisMonth.setDate(1);
     thisMonth.setHours(0, 0, 0, 0);
 
-    const monthOrders = await Order.findAll({
-      where: {
-        status: 'filled',
-        updatedAt: { [Op.gte]: thisMonth }
+    // Calculate volumes by filtering the cached result set
+    let platformVolumeToday = 0;
+    let platformVolumeMonth = 0;
+    const dailyVolumes = {};
+
+    allRecentOrders.forEach(order => {
+      const orderDate = new Date(order.updatedAt);
+      const volume = parseFloat(order.price) * parseFloat(order.filledQuantity || order.quantity);
+      
+      // Today's volume
+      if (orderDate >= today) {
+        platformVolumeToday += volume;
       }
+      
+      // This month's volume
+      if (orderDate >= thisMonth) {
+        platformVolumeMonth += volume;
+      }
+      
+      // Daily breakdown for recent earnings
+      const dayKey = new Date(orderDate);
+      dayKey.setHours(0, 0, 0, 0);
+      const dayStr = dayKey.toISOString().split('T')[0];
+      dailyVolumes[dayStr] = (dailyVolumes[dayStr] || 0) + volume;
     });
 
-    const platformVolumeMonth = monthOrders.reduce((sum, order) => {
-      return sum + (parseFloat(order.price) * parseFloat(order.filled_quantity || order.quantity));
-    }, 0);
+    // Calculate fees and shares for today
+    const feesGeneratedToday = platformVolumeToday * 0.001;
+    const holderShareToday = feesGeneratedToday * 0.15;
+    const yourShareToday = holderShareToday * userSharePercent;
 
+    // Calculate fees and shares for this month
     const feesGeneratedMonth = platformVolumeMonth * 0.001;
     const holderShareMonth = feesGeneratedMonth * 0.15;
     const yourShareMonth = holderShareMonth * userSharePercent;
 
-    // All time
+    // Get all-time volume (separate query only if needed)
     const allOrders = await Order.findAll({
-      where: { status: 'filled' }
+      where: { status: 'filled' },
+      attributes: ORDER_ATTRIBUTES
     });
 
     const platformVolumeAllTime = allOrders.reduce((sum, order) => {
-      return sum + (parseFloat(order.price) * parseFloat(order.filled_quantity || order.quantity));
+      return sum + (parseFloat(order.price) * parseFloat(order.filledQuantity || order.quantity));
     }, 0);
 
     const feesAllTime = platformVolumeAllTime * 0.001;
@@ -85,31 +118,22 @@ router.get('/summary', protect, async (req, res) => {
     const investment = ttxHoldings * ttxPrice;
     const apy = investment > 0 ? (estimatedYearly / investment) * 100 : 0;
 
-    // Recent earnings (simulated - show daily breakdown)
+    // Apply minimum display threshold to avoid demotivating zeros
+    const MIN_DISPLAY_THRESHOLD = 0.01; // $0.01
+    const formatDisplayValue = (value) => {
+      if (value === 0) return value;
+      return value < MIN_DISPLAY_THRESHOLD ? '< $0.01' : value;
+    };
+
+    // Recent earnings from cached daily volumes
     const recentEarnings = [];
     for (let i = 0; i < 7; i++) {
       const date = new Date();
       date.setDate(date.getDate() - i);
       date.setHours(0, 0, 0, 0);
+      const dayStr = date.toISOString().split('T')[0];
 
-      const nextDate = new Date(date);
-      nextDate.setDate(nextDate.getDate() + 1);
-
-      const dayOrders = await Order.findAll({
-        where: {
-          status: 'filled',
-          updatedAt: {
-            [Op.gte]: date,
-            [Op.lt]: nextDate
-          }
-        },
-        limit: 100 // Performance optimization
-      });
-
-      const dayVolume = dayOrders.reduce((sum, order) => {
-        return sum + (parseFloat(order.price) * parseFloat(order.filled_quantity || order.quantity));
-      }, 0);
-
+      const dayVolume = dailyVolumes[dayStr] || 0;
       const dayFees = dayVolume * 0.001;
       const dayHolderShare = dayFees * 0.15;
       const dayYourShare = dayHolderShare * userSharePercent;
@@ -131,10 +155,13 @@ router.get('/summary', protect, async (req, res) => {
       userSharePercent: (userSharePercent * 100).toFixed(4),
       platformVolumeToday,
       yourShareToday,
+      yourShareTodayDisplay: formatDisplayValue(yourShareToday),
       totalEarnedThisMonth: yourShareMonth,
       totalEarnedAllTime: yourShareAllTime,
       estimatedMonthly,
+      estimatedMonthlyDisplay: formatDisplayValue(estimatedMonthly),
       estimatedYearly,
+      estimatedYearlyDisplay: formatDisplayValue(estimatedYearly),
       apy,
       recentEarnings
     });
@@ -167,22 +194,23 @@ router.get('/live', protect, async (req, res) => {
     // Get last 10 filled orders (live activity)
     const recentTrades = await Order.findAll({
       where: { status: 'filled' },
+      include: [TOKEN_SYMBOL_INCLUDE],
       order: [['updatedAt', 'DESC']],
       limit: 10
     });
 
     const liveActivity = recentTrades.map(order => {
-      const tradeVolume = parseFloat(order.price) * parseFloat(order.filled_quantity || order.quantity);
+      const tradeVolume = parseFloat(order.price) * parseFloat(order.filledQuantity || order.quantity);
       const tradeFee = tradeVolume * 0.001;
       const holderShare = tradeFee * 0.15;
       const yourEarning = holderShare * userSharePercent;
 
       return {
         timestamp: order.updatedAt,
-        symbol: order.token_symbol,
+        symbol: order.token?.symbol || 'Unknown',
         volume: tradeVolume,
         yourEarning: yourEarning,
-        message: `Someone traded ${order.token_symbol} → You earned $${yourEarning.toFixed(6)}`
+        message: `Someone traded ${order.token?.symbol || 'Unknown'} → You earned $${yourEarning.toFixed(6)}`
       };
     });
 
@@ -197,6 +225,81 @@ router.get('/live', protect, async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to get live earnings'
+    });
+  }
+});
+
+/**
+ * GET /api/earnings/mining
+ * Get user's trading mining summary
+ */
+router.get('/mining', protect, async (req, res) => {
+  try {
+    const summary = await tradingMiningService.getUserSummary(req.user.id);
+    
+    res.json({
+      success: true,
+      mining: summary
+    });
+  } catch (error) {
+    console.error('Error getting mining summary:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get mining summary'
+    });
+  }
+});
+
+/**
+ * GET /api/earnings/platform
+ * Get platform-wide earnings stats for the dashboard banner
+ */
+router.get('/platform', async (req, res) => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Get today's filled orders
+    const todayOrders = await Order.findAll({
+      where: {
+        status: 'filled',
+        updatedAt: { [Op.gte]: today }
+      },
+      attributes: ORDER_ATTRIBUTES
+    });
+
+    const platformVolumeToday = todayOrders.reduce((sum, order) => {
+      return sum + (parseFloat(order.price) * parseFloat(order.filledQuantity || order.quantity));
+    }, 0);
+
+    const feesGeneratedToday = platformVolumeToday * 0.001; // 0.1% fee
+    const holderShareToday = feesGeneratedToday * 0.15; // 15% to holders
+    const platformShareToday = feesGeneratedToday * 0.85; // 85% to platform
+
+    // Get total mining rewards distributed today
+    const { UserReward } = require('../models');
+    const miningToday = await UserReward.sum('amount', {
+      where: {
+        rewardType: 'trading_volume',
+        createdAt: { [Op.gte]: today }
+      }
+    }) || 0;
+
+    res.json({
+      success: true,
+      platform: {
+        volumeToday: platformVolumeToday,
+        feesGenerated: feesGeneratedToday,
+        holderShare: holderShareToday,
+        platformShare: platformShareToday,
+        miningDistributed: miningToday
+      }
+    });
+  } catch (error) {
+    console.error('Error getting platform stats:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get platform stats'
     });
   }
 });

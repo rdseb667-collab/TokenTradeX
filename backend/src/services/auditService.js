@@ -54,6 +54,33 @@ class AuditService {
   }
 
   /**
+   * Convenience method for logging - maps details to metadata
+   */
+  async log({
+    userId,
+    action,
+    resourceType = null,
+    resourceId = null,
+    details = {},
+    ipAddress = null,
+    userAgent = null,
+    status = 'success',
+    errorMessage = null
+  }) {
+    return this.logAction({
+      userId,
+      action,
+      resourceType,
+      resourceId,
+      metadata: details,
+      ipAddress,
+      userAgent,
+      status,
+      errorMessage
+    });
+  }
+
+  /**
    * Log admin account creation
    */
   async logAdminCreation(adminUser, newAdminEmail, req) {

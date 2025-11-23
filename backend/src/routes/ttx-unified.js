@@ -29,7 +29,7 @@ router.get('/stats', async (req, res) => {
       success: true,
       stats,
       revenueStats,
-      flywheel: revenueStreamService.getFlywheelMetrics(),
+      flywheel: await revenueStreamService.getFlywheelMetrics(),
     });
   } catch (error) {
     res.status(500).json({
@@ -116,15 +116,16 @@ router.get('/revenue-streams', async (req, res) => {
 
     // Fallback to backend tracking
     if (streams.length === 0) {
-      streams = revenueStreamService.revenueStreams.map((stream) => ({
+      const dbStreams = await revenueStreamService.getAllStreams();
+      streams = dbStreams.map((stream) => ({
         id: stream.id,
         name: stream.name,
         description: stream.description,
-        totalCollected: stream.collected,
-        holderShare: stream.collected * 0.15,  // 15% to holders
-        reserveShare: stream.collected * 0.85,  // 85% to platform
-        targetMonthly: stream.targetMonthly,
-        progress: (stream.collected / stream.targetMonthly) * 100,
+        totalCollected: parseFloat(stream.collected || 0),
+        holderShare: parseFloat(stream.collected || 0) * 0.15,  // 15% to holders
+        reserveShare: parseFloat(stream.collected || 0) * 0.85,  // 85% to platform
+        targetMonthly: parseFloat(stream.targetMonthly || 0),
+        progress: parseFloat(stream.targetMonthly || 0) > 0 ? (parseFloat(stream.collected || 0) / parseFloat(stream.targetMonthly || 0)) * 100 : 0,
       }));
     }
 

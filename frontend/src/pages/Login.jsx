@@ -20,8 +20,10 @@ export default function Login() {
   const { loading, error } = useSelector((state) => state.auth);
   const [formData, setFormData] = useState({
     email: '',
-    password: ''
+    password: '',
+    twoFactorToken: ''
   });
+  const [requires2FA, setRequires2FA] = useState(false);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -35,7 +37,13 @@ export default function Login() {
       // Navigate to app dashboard
       navigate('/app/dashboard');
     } catch (err) {
-      toast.error(err || 'Login failed');
+      // Check if 2FA is required
+      if (err === '2FA_REQUIRED') {
+        setRequires2FA(true);
+        toast.info('Please enter your 2FA code');
+      } else {
+        toast.error(err || 'Login failed');
+      }
     }
   };
 
@@ -91,6 +99,20 @@ export default function Login() {
               required
               margin="normal"
             />
+            {requires2FA && (
+              <TextField
+                fullWidth
+                label="2FA Token"
+                name="twoFactorToken"
+                type="text"
+                value={formData.twoFactorToken}
+                onChange={handleChange}
+                required
+                margin="normal"
+                placeholder="Enter 6-digit code from authenticator"
+                helperText="Enter the code from Google Authenticator or similar app"
+              />
+            )}
             <Button
               fullWidth
               type="submit"

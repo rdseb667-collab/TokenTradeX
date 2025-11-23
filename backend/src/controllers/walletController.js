@@ -149,14 +149,87 @@ class WalletController {
       const { tokenId, amount, address } = req.body;
       const userId = req.user.id;
 
+      // Validate input data
+      if (!tokenId || !amount || !address) {
+        await t.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'MISSING_FIELDS',
+          error: 'Missing required fields: tokenId, amount, and address are all required'
+        });
+      }
+
+      // Validate amount is a positive number
+      const amountFloat = parseFloat(amount);
+      if (isNaN(amountFloat) || amountFloat <= 0) {
+        await t.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'INVALID_AMOUNT',
+          error: 'Amount must be a positive number'
+        });
+      }
+
+      // Validate address is not empty
+      if (!address.trim()) {
+        await t.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'INVALID_ADDRESS',
+          error: 'Withdrawal address is required'
+        });
+      }
+
       // Get token to calculate USD value
       const token = await Token.findByPk(tokenId);
       if (!token) {
         await t.rollback();
-        return res.status(404).json({ success: false, message: 'Token not found' });
+        return res.status(404).json({ 
+          success: false, 
+          message: 'TOKEN_NOT_FOUND', 
+          error: 'Token not found' 
+        });
       }
 
-      const amountUSD = parseFloat(amount) * parseFloat(token.currentPrice);
+      const amountUSD = amountFloat * parseFloat(token.currentPrice);
+
+      // Check daily withdrawal limit
+      const maxDailyWithdrawalUSD = parseFloat(process.env.MAX_DAILY_WITHDRAWAL_USD || 10000); // $10,000 default
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      
+      const todayEnd = new Date();
+      todayEnd.setHours(23, 59, 59, 999);
+      
+      const todayWithdrawals = await Transaction.findAll({
+        where: {
+          userId,
+          type: 'withdrawal',
+          status: { [Op.in]: ['completed', 'pending'] }, // Include pending as they count toward limit
+          createdAt: {
+            [Op.between]: [todayStart, todayEnd]
+          }
+        }
+      });
+      
+      const todayTotalUSD = todayWithdrawals.reduce((sum, withdrawal) => {
+        // Get the token for this withdrawal to calculate USD value
+        const withdrawalToken = withdrawal.token || token; // Use current token if not populated
+        const withdrawalUSD = parseFloat(withdrawal.amount) * parseFloat(withdrawalToken.currentPrice || token.currentPrice);
+        return sum + withdrawalUSD;
+      }, 0);
+      
+      const remainingLimit = maxDailyWithdrawalUSD - todayTotalUSD;
+      
+      if (amountUSD > remainingLimit) {
+        await t.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'DAILY_WITHDRAWAL_LIMIT_REACHED',
+          error: `Daily withdrawal limit would be exceeded. Remaining limit: $${remainingLimit.toFixed(2)}`,
+          remainingLimit: remainingLimit
+        });
+      }
 
       // WHALE PROTECTION: Check withdrawal limits
       const withdrawalCheck = await whaleProtectionService.checkWithdrawalLimit(
@@ -169,7 +242,8 @@ class WalletController {
         await t.rollback();
         return res.status(400).json({
           success: false,
-          message: withdrawalCheck.reason,
+          message: 'WITHDRAWAL_LIMIT_EXCEEDED',
+          error: withdrawalCheck.reason,
           remaining: withdrawalCheck.remaining
         });
       }
@@ -184,27 +258,67 @@ class WalletController {
         await t.rollback();
         return res.status(404).json({
           success: false,
-          message: 'Wallet not found'
+          message: 'WALLET_NOT_FOUND',
+          error: 'Wallet not found'
         });
       }
 
       const availableBalance = parseFloat(wallet.balance) - parseFloat(wallet.lockedBalance);
 
-      if (availableBalance < parseFloat(amount)) {
+      if (availableBalance < amountFloat) {
         await t.rollback();
         return res.status(400).json({
           success: false,
-          message: 'Insufficient balance'
+          message: 'INSUFFICIENT_FUNDS',
+          error: `Insufficient balance. Available: ${availableBalance.toFixed(4)} ${token.symbol}, Requested: ${amountFloat.toFixed(4)} ${token.symbol}`
+        });
+      }
+
+      // Calculate withdrawal fee (Stream #1: Withdrawal Fees)
+      const withdrawalFeePercent = parseFloat(process.env.WITHDRAWAL_FEE_PERCENT || 0.5); // 0.5% default
+      const minWithdrawalFee = parseFloat(process.env.MIN_WITHDRAWAL_FEE_USD || 1); // $1 minimum
+      let withdrawalFee = amountFloat * (withdrawalFeePercent / 100);
+      
+      // Convert min fee to token amount
+      const minFeeInTokens = minWithdrawalFee / parseFloat(token.currentPrice);
+      if (withdrawalFee < minFeeInTokens) {
+        withdrawalFee = minFeeInTokens;
+      }
+      
+      const totalDeduction = amountFloat + withdrawalFee;
+      
+      if (availableBalance < totalDeduction) {
+        await t.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'INSUFFICIENT_FUNDS',
+          error: `Insufficient balance. Need ${totalDeduction.toFixed(4)} ${token.symbol} (${amountFloat} + ${withdrawalFee.toFixed(4)} fee)`
         });
       }
 
       const balanceBefore = parseFloat(wallet.balance);
-      const newBalance = balanceBefore - parseFloat(amount);
+      const newBalance = balanceBefore - totalDeduction;
 
-      // Update wallet
+      // Update wallet (deduct amount + fee)
       await wallet.update({
         balance: newBalance
       }, { transaction: t });
+
+      // Collect withdrawal fee revenue (Stream #1)
+      const withdrawalFeeUSD = withdrawalFee * parseFloat(token.currentPrice);
+      const revenueCollector = require('../helpers/revenueCollector');
+      setImmediate(async () => {
+        try {
+          await revenueCollector.collectRevenue(
+            1, 
+            withdrawalFeeUSD, 
+            `Withdrawal: ${amountFloat} ${token.symbol} to ${address}`
+          );
+          console.log(`💸 Withdrawal fee collected: $${withdrawalFeeUSD.toFixed(2)} (${withdrawalFee.toFixed(4)} ${token.symbol})`);
+        } catch (error) {
+          console.error('Failed to collect withdrawal fee:', error.message);
+        }
+      });
 
       // Calculate processing time based on delay
       const processAt = withdrawalCheck.delayHours > 0
@@ -216,12 +330,12 @@ class WalletController {
         userId,
         tokenId,
         type: 'withdrawal',
-        amount: parseFloat(amount),
+        amount: amountFloat,
         balanceBefore,
         balanceAfter: newBalance,
         status: withdrawalCheck.delayHours > 0 ? 'pending' : 'pending',
         reference: address,
-        notes: withdrawalCheck.message
+        notes: `${withdrawalCheck.message} | Fee: ${withdrawalFee.toFixed(4)} ${token.symbol}`
       }, { transaction: t });
 
       await t.commit();
@@ -233,7 +347,14 @@ class WalletController {
         processAt: processAt,
         data: {
           wallet,
-          transaction
+          transaction,
+          withdrawalDetails: {
+            requestedAmount: amountFloat,
+            withdrawalFee: withdrawalFee,
+            totalDeducted: totalDeduction,
+            youReceive: amountFloat,
+            feePercent: withdrawalFeePercent
+          }
         }
       });
     } catch (error) {
@@ -245,7 +366,8 @@ class WalletController {
   // Get transaction history
   async getTransactions(req, res, next) {
     try {
-      const { type, tokenId, limit = 50 } = req.query;
+      const { type, tokenId, page = 1, limit = 50 } = req.query;
+      const offset = (page - 1) * limit;
       
       const where = { userId: req.user.id };
       
@@ -257,24 +379,31 @@ class WalletController {
         where.tokenId = tokenId;
       }
 
-      const transactions = await Transaction.findAll({
+      const { count, rows: transactions } = await Transaction.findAndCountAll({
         where,
         include: [{ model: Token, as: 'token' }],
         order: [['createdAt', 'DESC']],
-        limit: parseInt(limit)
+        limit: parseInt(limit),
+        offset: parseInt(offset)
       });
 
       res.json({
         success: true,
         count: transactions.length,
-        data: transactions || []
+        data: transactions || [],
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: Math.ceil(count / limit),
+          totalItems: count,
+          itemsPerPage: parseInt(limit)
+        }
       });
     } catch (error) {
       console.error('Transaction history error:', error);
-      res.json({
-        success: true,
-        count: 0,
-        data: []
+      res.status(500).json({
+        success: false,
+        message: 'ERROR_FETCHING_TRANSACTIONS',
+        error: error.message
       });
     }
   }

@@ -1,5 +1,4 @@
-const UserReward = require('../models/UserReward');
-const { User } = require('../models');
+const { UserReward, User } = require('../models');
 const logger = require('./logger');
 
 const REWARD_AMOUNTS = {
@@ -65,7 +64,7 @@ class RewardService {
   }
 
   // Trading volume rewards - Earn while you trade!
-  async giveTradingVolumeReward(userId, tradeVolume) {
+  async giveTradingVolumeReward(userId, tradeVolume, context = {}) {
     try {
       const user = await User.findByPk(userId);
       const totalVolume = parseFloat(user.totalTradingVolume || 0);
@@ -91,7 +90,14 @@ class RewardService {
           claimedAt: new Date()
         });
 
-        logger.info('Trading volume reward given', { userId, volume: tradeVolume, amount: rewardAmount });
+        logger.info('Trading volume reward given', { 
+          userId, 
+          volume: tradeVolume, 
+          amount: rewardAmount,
+          tradeId: context.tradeId,
+          orderId: context.orderId,
+          correlationId: context.correlationId
+        });
 
         return {
           success: true,
@@ -102,13 +108,22 @@ class RewardService {
 
       return { success: false, message: 'No reward earned' };
     } catch (error) {
-      logger.error('Error giving trading volume reward', { error: error.message, userId });
+      logger.error('Error giving trading volume reward', { 
+        error: error.message,
+        stack: error.stack,
+        userId,
+        rewardType: 'trading_volume',
+        tradeVolume,
+        tradeId: context.tradeId,
+        orderId: context.orderId,
+        correlationId: context.correlationId
+      });
       throw error;
     }
   }
 
   // Milestone rewards
-  async checkAndGiveMilestoneRewards(userId) {
+  async checkAndGiveMilestoneRewards(userId, context = {}) {
     try {
       const user = await User.findByPk(userId);
       const totalTrades = await this.getUserTotalTrades(userId);
@@ -125,6 +140,13 @@ class RewardService {
           claimed: false
         });
         rewards.push(reward);
+        logger.info('Milestone reward given', {
+          userId,
+          milestone: '10_trades',
+          amount: REWARD_AMOUNTS.milestone_10_trades,
+          tradeId: context.tradeId,
+          correlationId: context.correlationId
+        });
       }
 
       // 100 trades milestone
@@ -137,11 +159,25 @@ class RewardService {
           claimed: false
         });
         rewards.push(reward);
+        logger.info('Milestone reward given', {
+          userId,
+          milestone: '100_trades',
+          amount: REWARD_AMOUNTS.milestone_100_trades,
+          tradeId: context.tradeId,
+          correlationId: context.correlationId
+        });
       }
 
       return { success: true, rewards };
     } catch (error) {
-      logger.error('Error checking milestone rewards', { error: error.message, userId });
+      logger.error('Error checking milestone rewards', { 
+        error: error.message,
+        stack: error.stack,
+        userId,
+        rewardType: 'milestone',
+        tradeId: context.tradeId,
+        correlationId: context.correlationId
+      });
       throw error;
     }
   }

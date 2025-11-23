@@ -10,6 +10,11 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
  * @dev Growth-focused token with multiple revenue streams shared with holders
  * Total supply: 1 Billion TTX (FIXED)
  * Distribution optimized for market cap growth and early adopter rewards
+ * 
+ * ⚠️ DEPRECATED - Nov 2025
+ * This contract is RETIRED. Use TTXUnified.sol instead.
+ * Reason: Conflicting tokenomics (70% holder share vs 15% unified model)
+ * Migration: All new deployments use TTXUnified.sol with clean 85/15 split
  */
 contract TTXReserveToken is ERC20, Ownable, ReentrancyGuard {
     // Token distribution - Growth focused

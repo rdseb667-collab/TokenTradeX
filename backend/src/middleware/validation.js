@@ -2,6 +2,11 @@ const Joi = require('joi');
 
 const validateRequest = (schema) => {
   return (req, res, next) => {
+    console.log('🔍 VALIDATION CHECK:', {
+      body: req.body,
+      path: req.path
+    });
+    
     const { error } = schema.validate(req.body, { abortEarly: false });
     
     if (error) {
@@ -10,13 +15,22 @@ const validateRequest = (schema) => {
         message: detail.message
       }));
       
+      console.error('❌ VALIDATION FAILED:', {
+        body: req.body,
+        errors
+      });
+      
+      // Return more informative error messages
       return res.status(400).json({
         success: false,
         message: 'Validation error',
-        errors
+        errors,
+        // Include user-friendly error message
+        userMessage: errors.length > 0 ? errors[0].message : 'Invalid request data'
       });
     }
     
+    console.log('✅ VALIDATION PASSED');
     next();
   };
 };
@@ -32,7 +46,8 @@ const registerSchema = Joi.object({  email: Joi.string().email().required(),
 
 const loginSchema = Joi.object({
   email: Joi.string().email().required(),
-  password: Joi.string().required()
+  password: Joi.string().required(),
+  twoFactorToken: Joi.string().optional().allow('')
 });
 
 // Order validation schemas
@@ -57,7 +72,7 @@ const createOrderSchema = Joi.object({
 const depositSchema = Joi.object({
   tokenId: Joi.string().uuid().required(),
   amount: Joi.number().positive().required(),
-  txHash: Joi.string().optional()
+  txHash: Joi.string().optional().allow('')
 });
 
 const withdrawSchema = Joi.object({

@@ -16,9 +16,17 @@ export const deposit = createAsyncThunk('wallet/deposit', async (data) => {
   return response.data.data;
 });
 
-export const withdraw = createAsyncThunk('wallet/withdraw', async (data) => {
-  const response = await api.post('/wallet/withdraw', data);
-  return response.data.data;
+export const withdraw = createAsyncThunk('wallet/withdraw', async (data, { rejectWithValue }) => {
+  try {
+    const response = await api.post('/wallet/withdraw', data);
+    return response.data.data;
+  } catch (error) {
+    // Return the error response data for better error handling
+    if (error.response && error.response.data) {
+      return rejectWithValue(error.response.data);
+    }
+    return rejectWithValue({ message: 'An unexpected error occurred' });
+  }
 });
 
 const walletSlice = createSlice({

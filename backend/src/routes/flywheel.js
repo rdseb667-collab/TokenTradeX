@@ -2,7 +2,15 @@ const express = require('express');
 const router = express.Router();
 const revenueStreamService = require('../services/revenueStreamService');
 const marketComparisonService = require('../services/marketComparisonService');
-const auth = require('../middleware/auth');
+const { protect } = require('../middleware/auth');
+const { calculateUserImpact, generatePersonalInsights } = require('../helpers/flywheelHelper');
+const { 
+  validateTTXAmount, 
+  validateMonthlyVolume, 
+  validatePlatformRevenue,
+  isTTXTokenSeeded
+} = require('../helpers/flywheelInputValidator');
+const { Token } = require('../models');
 
 /**
  * Revenue & Flywheel API
@@ -15,8 +23,8 @@ const auth = require('../middleware/auth');
  */
 router.get('/metrics', async (req, res, next) => {
   try {
-    const metrics = revenueStreamService.getFlywheelMetrics();
-    const reserveStatus = revenueStreamService.getReserveFundStatus();
+    const metrics = await revenueStreamService.getFlywheelMetrics();
+    const reserveStatus = await revenueStreamService.getReserveFundStatus();
     
     res.json({
       success: true,
@@ -33,39 +41,37 @@ router.get('/metrics', async (req, res, next) => {
  * @route GET /api/flywheel/my-impact
  * @desc Show user how their personal usage impacts their holdings
  */
-router.get('/my-impact', async (req, res, next) => {
+router.get('/my-impact', protect, async (req, res, next) => {
   try {
     const userId = req.user.id;
     
-    // Get user's TTX balance (simplified - would query from wallet)
-    const userTTXBalance = 10000; // TODO: Get from wallet
-    const userMonthlyVolume = 50000; // TODO: Get from trade history
+    // Check if TTX token is seeded
+    const isSeeded = await isTTXTokenSeeded(Token);
+    if (!isSeeded) {
+      return res.status(503).json({
+        success: false,
+        message: 'TTX token not available yet. Please try again later.'
+      });
+    }
     
-    const earnings = revenueStreamService.calculateUserMonthlyEarnings(
-      userTTXBalance,
-      500000 // Assume $500K monthly platform revenue
-    );
-    
-    const benefits = marketComparisonService.getUserBenefits(
-      userMonthlyVolume,
-      userTTXBalance
-    );
+    // Use centralized helper for consistent calculations
+    const impactData = await calculateUserImpact(userId);
     
     res.json({
       success: true,
       yourImpact: {
-        ttxHoldings: userTTXBalance,
-        monthlyVolume: userMonthlyVolume,
-        monthlyEarnings: earnings.monthlyEarnings,
-        annualEarnings: earnings.annualEarnings,
-        tier: earnings.tier,
-        revenueMultiplier: earnings.revenueMultiplier
+        ttxHoldings: impactData.ttxHoldings,
+        monthlyVolume: impactData.monthlyVolume,
+        monthlyEarnings: impactData.monthlyEarnings,
+        annualEarnings: impactData.annualEarnings,
+        tier: impactData.tier,
+        revenueMultiplier: impactData.revenueMultiplier
       },
-      vsCompetitors: benefits,
+      vsCompetitors: impactData.vsCompetitors,
       flywheelEffect: {
         message: 'Every trade you make increases your TTX value',
         breakdown: [
-          `You earn: $${earnings.monthlyEarnings.toFixed(2)}/month directly`,
+          `You earn: $${impactData.monthlyEarnings.toFixed(2)}/month directly`,
           'Reserve backing increases from your fees',
           'TTX price supported by growing reserve',
           'Your holdings appreciate without selling'
@@ -83,7 +89,7 @@ router.get('/my-impact', async (req, res, next) => {
  */
 router.get('/reserve-status', async (req, res, next) => {
   try {
-    const status = revenueStreamService.getReserveFundStatus();
+    const status = await revenueStreamService.getReserveFundStatus();
     
     res.json({
       success: true,
@@ -105,25 +111,28 @@ router.get('/reserve-status', async (req, res, next) => {
  */
 router.get('/revenue-streams', async (req, res, next) => {
   try {
-    const streams = revenueStreamService.revenueStreams.map(s => ({
+    const streams = await revenueStreamService.getAllStreams();
+    
+    const streamsData = streams.map(s => ({
+      id: s.id,
       name: s.name,
       description: s.description,
-      collected: s.collected,
-      targetMonthly: s.targetMonthly,
-      progress: s.targetMonthly > 0 ? ((s.collected / s.targetMonthly) * 100).toFixed(1) : 0,
-      distributedToHolders: s.distributed
+      collected: parseFloat(s.collected || 0),
+      targetMonthly: parseFloat(s.targetMonthly || 0),
+      progress: s.targetMonthly > 0 ? ((parseFloat(s.collected || 0) / parseFloat(s.targetMonthly)) * 100).toFixed(1) : 0,
+      distributedToHolders: parseFloat(s.distributed || 0)
     }));
     
-    const totalTarget = revenueStreamService.revenueStreams.reduce((sum, s) => sum + s.targetMonthly, 0);
-    const totalCollected = revenueStreamService.revenueStreams.reduce((sum, s) => sum + s.collected, 0);
+    const totalTarget = streamsData.reduce((sum, s) => sum + s.targetMonthly, 0);
+    const totalCollected = streamsData.reduce((sum, s) => sum + s.collected, 0);
     
     res.json({
       success: true,
-      streams,
+      streams: streamsData,
       summary: {
         totalTarget,
         totalCollected,
-        overallProgress: ((totalCollected / totalTarget) * 100).toFixed(1),
+        overallProgress: totalTarget > 0 ? ((totalCollected / totalTarget) * 100).toFixed(1) : 0,
         message: '10 revenue streams working for TTX holders'
       }
     });
@@ -138,30 +147,44 @@ router.get('/revenue-streams', async (req, res, next) => {
  */
 router.get('/calculator', async (req, res, next) => {
   try {
-    const { ttxAmount = 1000, monthlyVolume = 10000, platformRevenue = 500000 } = req.query;
+    // Validate inputs
+    const ttxAmount = validateTTXAmount(req.query.ttxAmount);
+    const monthlyVolume = validateMonthlyVolume(req.query.monthlyVolume);
+    
+    // Validate platform revenue if provided
+    let actualPlatformRevenue = null;
+    if (req.query.platformRevenue !== undefined) {
+      actualPlatformRevenue = validatePlatformRevenue(req.query.platformRevenue);
+    }
+    
+    // If platformRevenue is not provided or invalid, get actual platform revenue
+    if (actualPlatformRevenue === null) {
+      const flywheelMetrics = await revenueStreamService.getFlywheelMetrics();
+      actualPlatformRevenue = flywheelMetrics.totalPlatformRevenue || 500000; // Fallback to $500K if no revenue yet
+    }
     
     const earnings = revenueStreamService.calculateUserMonthlyEarnings(
-      parseFloat(ttxAmount),
-      parseFloat(platformRevenue)
+      ttxAmount,
+      actualPlatformRevenue
     );
     
     const benefits = marketComparisonService.getUserBenefits(
-      parseFloat(monthlyVolume),
-      parseFloat(ttxAmount)
+      monthlyVolume,
+      ttxAmount
     );
     
     const roi = revenueStreamService.calculateTTXInvestmentROI(
-      parseFloat(ttxAmount),
+      ttxAmount,
       0.10, // Assume $0.10 TTX price
-      parseFloat(platformRevenue)
+      actualPlatformRevenue
     );
     
     res.json({
       success: true,
       scenario: {
-        ttxHoldings: parseFloat(ttxAmount),
-        monthlyTradingVolume: parseFloat(monthlyVolume),
-        assumedPlatformRevenue: parseFloat(platformRevenue)
+        ttxHoldings: ttxAmount,
+        monthlyTradingVolume: monthlyVolume,
+        assumedPlatformRevenue: actualPlatformRevenue
       },
       earnings,
       benefits,
@@ -171,6 +194,12 @@ router.get('/calculator', async (req, res, next) => {
         'Good passive income potential.'
     });
   } catch (error) {
+    if (error.message.includes('Invalid')) {
+      return res.status(400).json({
+        success: false,
+        message: error.message
+      });
+    }
     next(error);
   }
 });
@@ -202,6 +231,72 @@ router.get('/comparison/:competitor', async (req, res, next) => {
         'Cross-platform utility'
       ],
       disclaimer: 'This comparison is for educational purposes. Token values and features may vary.'
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @route GET /api/flywheel/my-impact/export
+ * @desc Export user's flywheel impact as CSV
+ */
+router.get('/my-impact/export', protect, async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    
+    // Check if TTX token is seeded
+    const isSeeded = await isTTXTokenSeeded(Token);
+    if (!isSeeded) {
+      return res.status(503).json({
+        success: false,
+        message: 'TTX token not available yet. Please try again later.'
+      });
+    }
+    
+    // Use centralized helper for consistent calculations
+    const impactData = await calculateUserImpact(userId);
+    
+    // Format as CSV
+    const { formatImpactAsCSV } = require('../helpers/flywheelHelper');
+    const csvData = formatImpactAsCSV(impactData);
+    
+    // Set headers for CSV download
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="ttx-flywheel-impact.csv"');
+    
+    res.status(200).send(csvData);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @route GET /api/flywheel/my-impact/insights
+ * @desc Get personal improvement insights and recommendations
+ */
+router.get('/my-impact/insights', protect, async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    
+    // Check if TTX token is seeded
+    const isSeeded = await isTTXTokenSeeded(Token);
+    if (!isSeeded) {
+      return res.status(503).json({
+        success: false,
+        message: 'TTX token not available yet. Please try again later.'
+      });
+    }
+    
+    // Use centralized helper for consistent calculations
+    const impactData = await calculateUserImpact(userId);
+    
+    // Generate personal insights
+    const insights = generatePersonalInsights(impactData);
+    
+    res.json({
+      success: true,
+      insights
     });
   } catch (error) {
     next(error);
